@@ -34,6 +34,17 @@ func Peerconnection(uid	string) (*webrtc.PeerConnection, *webrtc.DataChannel, er
 		return nil, nil, err 
 	}
 	
+	peer_conn.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+		fmt.Printf("ICE Connection State has changed to: %s\n", connectionState.String())
+
+		if connectionState == webrtc.ICEConnectionStateFailed{
+			fmt.Printf("connection has failed to the given candidate")
+			if closeErr := peer_conn.Close(); closeErr != nil {
+				panic(closeErr)
+			}
+		}
+	})
+
 	dc, err := peer_conn.CreateDataChannel("data", nil)
 	if err != nil{
 		log.Println("error while creating data channel in user_comms.go")

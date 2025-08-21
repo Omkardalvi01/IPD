@@ -72,7 +72,10 @@ func main(){
 			if msg.IsString{
 				
 				if string(msg.Data) == END{
-					f.Close()
+					fmt.Printf("Download %s Complete\n",f.Name())
+					if err := f.Close(); err != nil{
+						log.Fatal("Error while closing file", err)
+					}
 				}else{
 					file_name = string(msg.Data)
 					file_path := filepath.Join(dir_name,file_name)

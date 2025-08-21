@@ -27,17 +27,18 @@ func main(){
 		log.Fatal("Error while reading dir", err)
 	}
 
-	requeschan := make(chan Request)
 	resultchan := make(chan Result)
-	wp := Workerpool{requestchan: requeschan, resultchan: resultchan}	
+	wp := Workerpool{resultchan: resultchan}	
 	
-	numWorkers := runtime.NumCPU()
-	fmt.Println("Workers :",numWorkers)
+	var numWorkers int
+	MaxWorkers := runtime.NumCPU()
+	fmt.Printf("Enter number of workers(recommended less than %d for your device)\n Workers:",MaxWorkers)
+	fmt.Scan(&numWorkers)
 
 	uid := create_uid()
 	fmt.Println("Connection_id:",uid)
 	
-	wp.start_pool(numWorkers, uid, &wg)
+	channel_pool := wp.start_pool(numWorkers, uid, &wg)
 
 	go func(){
 		i := 1
@@ -46,21 +47,24 @@ func main(){
 			i++
 		}
 	}()
-	
-	for _ , file_entries := range files{
-			file_path := filepath.Join(dir ,file_entries.Name())
-			
-			file , err := os.Open(file_path)
-			if err != nil {
-				log.Printf("Error while reading file %s error %v\n", file_path, err)
-				continue
-			}
-			wg.Add(1)
-			requeschan <- Request{f: file}
-		}
-	close(requeschan)
 
 	wg.Wait()
-	close(resultchan)
+	for i , file_entries := range files{
+		file_path := filepath.Join(dir ,file_entries.Name())
+		
+		file , err := os.Open(file_path)
+		if err != nil {
+			log.Printf("Error while reading file %s error %v\n", file_path, err)
+			continue
+		}
+		
+		channel_pool[i % numWorkers] <- Request{f: file}
+	}
+
+	for i := 0; i < len(channel_pool); i++ {
+		close(channel_pool[i])
+	}
+	
+	select{}
 
 }

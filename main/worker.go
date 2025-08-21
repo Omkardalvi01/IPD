@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+
 	"github.com/Omkardalvi01/IPD/networking"
 )
 
@@ -44,6 +45,8 @@ func (w Worker) start(wg *sync.WaitGroup){
 	defer dc.Close()
 	defer peer.Close()
 
+	wg.Done()
+
 	dc.OnOpen(func() {
 		fmt.Println("Data channel Open")
 		for r := range w.req_chan {
@@ -65,7 +68,7 @@ func (w Worker) start(wg *sync.WaitGroup){
 
 			w.res_chan <- Result{worker_id: w.worker_id, result: SUCCESS}
 			r.f.Close()
-			wg.Done()
+			
 		}
 		stop_worker <- struct{}{}
 		
@@ -74,17 +77,21 @@ func (w Worker) start(wg *sync.WaitGroup){
 }
 
 type Workerpool struct{
-	requestchan <-chan Request
 	num_workers int
 	resultchan chan<- Result
 }
 
-func (wp *Workerpool) start_pool(n int, id string, wg *sync.WaitGroup){
+func (wp *Workerpool) start_pool(n int, id string, wg *sync.WaitGroup) []chan Request{
 	wp.num_workers = n
+	data_chan := make([]chan Request,0)
 	for i := 0 ; i < n ; i++ {
-		w := Worker{worker_id: i, req_chan: wp.requestchan, res_chan: wp.resultchan, conn_id: id}
+		rq := make(chan Request)
+		w := Worker{worker_id: i, req_chan: rq, res_chan: wp.resultchan, conn_id: id}
+		wg.Add(1)
+		data_chan = append(data_chan, rq)
 		go w.start(wg)
 	}
+	return data_chan
 }
 
 
