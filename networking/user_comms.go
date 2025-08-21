@@ -30,26 +30,26 @@ func Peerconnection(uid	string) (*webrtc.PeerConnection, *webrtc.DataChannel, er
 	
 	peer_conn, err := webrtc.NewPeerConnection(Webconfig)
 	if err != nil {
-		log.Println("error at line 26 of user_comms.go")
+		log.Println("error while creaating peer connection in user_comms.go")
 		return nil, nil, err 
 	}
 	
 	dc, err := peer_conn.CreateDataChannel("data", nil)
 	if err != nil{
-		log.Println("error at line 30 of user_comms.go")
+		log.Println("error while creating data channel in user_comms.go")
 		return nil, nil, err 
 	}
 
 	offer , err := peer_conn.CreateOffer(nil)
 	if err != nil {
-		log.Println("error at line 38 of user_comms.go")
+		log.Println("error while creating offer in user_comms.go")
 		return nil, nil, err 
 	}
 
 
 	err = peer_conn.SetLocalDescription(offer)
 	if err != nil {
-		log.Println("error at line 45 of user_comms.go")
+		log.Println("error setting local description user_comms.go")
 		return nil, nil, err 
 	}
 
@@ -72,7 +72,7 @@ func Peerconnection(uid	string) (*webrtc.PeerConnection, *webrtc.DataChannel, er
 
 	err = peer_conn.SetRemoteDescription(answer_sdp)
 	if err != nil {
-		log.Println("error at line 69 of user_comms.go")
+		log.Println("error setting setting remote description user_comms.go")
 		return nil, nil, err  
 	}
 	fmt.Print(peer_conn.RemoteDescription().SDP)

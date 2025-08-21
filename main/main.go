@@ -9,14 +9,12 @@ import (
 	"sync"
 )
 
-
-
 func main(){
 	var wg sync.WaitGroup
 	// var dir string
 	// fmt.Print("Provide dir path: ")
 	// fmt.Scan(&dir)
-	dir := "./images"
+	dir := "./train"
 	
 	f, err := os.Open(dir)
 	if err != nil {
