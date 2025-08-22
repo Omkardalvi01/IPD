@@ -1,0 +1,8 @@
+{
+  "worker_id": "",
+  "python_script": "./train.py",
+  "batch_directory": "./batches",
+  "weights_path": "./weights/model_weights",
+  "signaling_server": "ws://localhost:8000/",
+  "heartbeat_interval": "30s"
+}
