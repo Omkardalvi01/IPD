@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"github.com/Omkardalvi01/IPD/networking"
 	"github.com/pion/webrtc/v3"
 )
@@ -16,6 +17,17 @@ const(
 	END string = "EOF"
 )
 
+type Edge struct {
+	yoloTrainer *YOLOTrainer
+	trainingStats struct {
+		totalImages     int
+		batchesCompleted int
+		totalTrainingTime float64
+		avgLoss         float64
+		avgMAP          float64
+	}
+}
+
 func main(){
 	var dir_name string
 	fmt.Println("Name of dir you want to copy into:")
@@ -24,6 +36,11 @@ func main(){
 	err := os.MkdirAll(dir_name, 0755)
 	if err != nil{
 		log.Fatal("Error while make dir")
+	}
+
+	// Initialize YOLO trainer
+	edge := &Edge{
+		yoloTrainer: NewYOLOTrainer(),
 	}
 
 	conn , err := networking.Createconnection()
@@ -56,15 +73,7 @@ func main(){
 		fmt.Printf("New DataChannel %s\n", dc.Label())
 
 		dc.OnOpen(func() {
-			fmt.Println("Connected to peer. Type messages:")
-
-			go func() {
-				var msg string
-				for {
-					fmt.Scan(&msg)
-					dc.SendText(msg)
-				}
-			}()
+			fmt.Println("Connected to peer. Ready to receive files for YOLO training:")
 		})
 
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -89,6 +98,21 @@ func main(){
 				_ , err = io.Copy(f, bytes.NewBuffer(msg.Data))
 				if err != nil{
 					log.Fatal("Error while copying file", err)
+				}
+				
+				// After file is received, process it for YOLO training if it's an image
+				if isImageFile(file_name) {
+					// Read the file data for YOLO processing
+					file_path := filepath.Join(dir_name, file_name)
+					fileData, readErr := os.ReadFile(file_path)
+					if readErr != nil {
+						log.Printf("Warning: failed to read file for YOLO training: %v", readErr)
+					} else {
+						// Process image with YOLO trainer
+						if processErr := edge.handleReceivedFile(file_name, fileData); processErr != nil {
+							log.Printf("Warning: YOLO processing failed: %v", processErr)
+						}
+					}
 				}
 			}
 		
@@ -133,4 +157,63 @@ func main(){
 
 	select{}
 
+}
+
+func (e *Edge) handleReceivedFile(filename string, data []byte) error {
+	log.Printf("Received file: %s (%d bytes)", filename, len(data))
+	
+	if isImageFile(filename) {
+		log.Printf("Adding image to YOLO training batch...")
+		
+		result, err := e.yoloTrainer.TrainOnImage(data, filename)
+		if err != nil {
+			log.Printf("YOLO training failed: %v", err)
+			return err
+		}
+		
+		// Update training statistics
+		e.trainingStats.totalImages++
+		if result.BatchCompleted {
+			e.trainingStats.batchesCompleted++
+			e.trainingStats.totalTrainingTime += result.TrainingTime
+			if result.TrainingLoss > 0 {
+				e.trainingStats.avgLoss = (e.trainingStats.avgLoss*float64(e.trainingStats.batchesCompleted-1) + result.TrainingLoss) / float64(e.trainingStats.batchesCompleted)
+			}
+			if result.ValidationMAP > 0 {
+				e.trainingStats.avgMAP = (e.trainingStats.avgMAP*float64(e.trainingStats.batchesCompleted-1) + result.ValidationMAP) / float64(e.trainingStats.batchesCompleted)
+			}
+		}
+		
+		log.Printf("YOLO Training Status for %s:", filename)
+		log.Printf("  Batch Status: %d/%d images", result.BatchInfo.CurrentBatchSize, result.BatchInfo.MaxBatchSize)
+		
+		if result.BatchCompleted {
+			log.Printf("  ✓ BATCH TRAINING COMPLETED!")
+			log.Printf("  Training Loss: %.6f", result.TrainingLoss)
+			log.Printf("  Validation mAP: %.6f", result.ValidationMAP)
+			log.Printf("  Training Time: %.3f seconds", result.TrainingTime)
+			log.Printf("  Model Weights File: %s", result.WeightsFilePath)
+		}
+		
+		log.Printf("  Total Stats - Images: %d, Batches: %d, Avg Loss: %.6f, Avg mAP: %.6f", 
+			e.trainingStats.totalImages, e.trainingStats.batchesCompleted, 
+			e.trainingStats.avgLoss, e.trainingStats.avgMAP)
+		
+		return nil
+	}
+	
+	log.Printf("Non-image file received: %s", filename)
+	return nil
+}
+
+func isImageFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	imageExts := []string{".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+	
+	for _, imgExt := range imageExts {
+		if ext == imgExt {
+			return true
+		}
+	}
+	return false
 }
