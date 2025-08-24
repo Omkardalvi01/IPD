@@ -57,7 +57,7 @@ func NewYOLOTrainer() *YOLOTrainer {
 	
 	return &YOLOTrainer{
 		pythonPath: "python3",
-		scriptPath: "ml/yolo_trainer.py",
+		scriptPath: "../ml/yolo_trainer.py",
 		tempDir: tempDir,
 		weightsDir: weightsDir,
 		trainingLogDir: trainingLogDir,
