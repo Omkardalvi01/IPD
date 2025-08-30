@@ -6,7 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var TEST_LINK = "ws://localhost:8000/" 
+var TEST_LINK = "ws://localhost:10000/" 
 var LIVE_LINK = "wss://sdp-server-1.onrender.com"
 
 func Createconnection() (*websocket.Conn, error){
@@ -33,7 +33,7 @@ func Recieve(conn *websocket.Conn) (string,error){
 
 	_ , resp , err := conn.ReadMessage()
 	if err != nil {
-		log.Println("Error while reievig in signaling.go err")
+		log.Println("Error while recieving in signaling.go err")
 		return "",err
 	}
 	return string(resp),nil

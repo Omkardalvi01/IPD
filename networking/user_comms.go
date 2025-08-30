@@ -7,7 +7,7 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 const(
-	Role string = "W"
+	Role string = "C"
 )
 
 func Peerconnection(uid	string) (*webrtc.PeerConnection, *webrtc.DataChannel, error) {

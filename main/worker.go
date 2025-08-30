@@ -27,10 +27,12 @@ type Request struct{
 }
 
 type Worker struct{
-	req_chan <-chan Request
+	req_chan chan Request
 	res_chan chan<- Result
-	worker_id int
 	conn_id string
+	worker_id int
+	current int
+	weight int
 }
 
 func (w Worker) start(wg *sync.WaitGroup){
@@ -77,21 +79,34 @@ func (w Worker) start(wg *sync.WaitGroup){
 }
 
 type Workerpool struct{
-	num_workers int
 	resultchan chan<- Result
+	workers []*Worker
+	num_workers int
 }
 
-func (wp *Workerpool) start_pool(n int, id string, wg *sync.WaitGroup) []chan Request{
+func (wp *Workerpool) start_pool(n int, id []string, weights map[string]int, wg *sync.WaitGroup) {
 	wp.num_workers = n
-	data_chan := make([]chan Request,0)
 	for i := 0 ; i < n ; i++ {
-		rq := make(chan Request)
-		w := Worker{worker_id: i, req_chan: rq, res_chan: wp.resultchan, conn_id: id}
+		w := Worker{worker_id: i, req_chan: make(chan Request), res_chan: wp.resultchan, conn_id: id[i], weight: weights[id[i]], current: 0}
+		wp.workers = append(wp.workers, &w)
 		wg.Add(1)
-		data_chan = append(data_chan, rq)
 		go w.start(wg)
 	}
-	return data_chan
 }
 
+func (wp *Workerpool) pickWorker() *Worker{
+	var best *Worker
+	total := 0
 
+	for _, w := range wp.workers{
+		w.current += w.weight
+		total += w.weight
+		if best == nil || w.current > best.current{
+			best = w
+		}
+	}
+
+	best.current -= total
+	return best
+
+}

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"github.com/Omkardalvi01/IPD/networking"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -15,6 +17,11 @@ const(
 	Role string = "E"
 	END string = "EOF"
 )
+
+func id_maker() string{
+	u , _ := uuid.NewUUID()
+	return u.String()
+}
 
 func main(){
 	var dir_name string
@@ -24,23 +31,48 @@ func main(){
 	err := os.MkdirAll(dir_name, 0755)
 	if err != nil{
 		log.Fatal("Error while make dir")
+	} 
+
+	edge_id := id_maker()
+	fmt.Printf("Edge id %s\n",edge_id)
+
+	var room_id string
+	fmt.Print("Give the room_id: ")
+	fmt.Scan(&room_id)
+	
+	postBody := map[string]string{
+		"role" : Role,
+		"room_id":  room_id,
+		"edge_id": edge_id,
+   }
+
+   algo_service , _, err := websocket.DefaultDialer.Dial("ws://localhost:5000/join", nil)
+   if err != nil{
+		log.Fatal("Error while creating connection to algorithm service", err)
 	}
 
-	conn , err := networking.Createconnection()
+	err = algo_service.WriteJSON(postBody)
+	if err != nil{
+		log.Fatal("Error while writing to connection", err)
+	}
+
+	_, resp, err := algo_service.ReadMessage()
+	if err != nil{
+		log.Println("Error while reading from connection ", err)
+	}
+	fmt.Println("Response from algo service ", string(resp))
+
+   conn , err := networking.Createconnection()
 	if err != nil{
 		return
-	} 
-	
-	var uid string
-	fmt.Print("Give the unique_id: ")
-	fmt.Scan(&uid)
+	}
 	
 	err = networking.Forward(conn, Role)
 	if err != nil{
 		log.Fatal("Error while forwarding role",err)
 	}
 
-	err = networking.Forward(conn, uid)
+	err = networking.Forward(conn, edge_id)
 	if err != nil{
 		log.Fatal("Error while forwarding uid",err)
 	}
