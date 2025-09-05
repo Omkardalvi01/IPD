@@ -1,0 +1,33 @@
+{
+  "system": {
+    "max_workers": 4,
+    "heartbeat_interval": "30s",
+    "processing_timeout": "10m",
+    "connection_timeout": "30s",
+    "retry_attempts": 3,
+    "external_script_path": "./scripts/process.py",
+    "input_base_directory": "./data/input",
+    "output_base_directory": "./data/output",
+    "signaling_server_url": "ws://localhost:8000",
+    "log_level": "INFO",
+    "enable_metrics": false,
+    "metrics_port": 9090
+  },
+  "network": {
+    "stun_servers": [
+      "stun:stun.l.google.com:19302",
+      "stun:stun1.l.google.com:19302"
+    ],
+    "turn_servers": [],
+    "data_channel_timeout": "30s",
+    "max_reconnect_attempts": 5,
+    "reconnect_delay": "2s"
+  },
+  "file_transmission": {
+    "chunk_size": 65536,
+    "max_concurrent_files": 3,
+    "transmission_timeout": "2m",
+    "retry_attempts": 3,
+    "enable_checksum": true
+  }
+}
