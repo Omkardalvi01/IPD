@@ -12,25 +12,6 @@ A robust distributed image processing system with persistent worker connections,
 - **Error Recovery**: Comprehensive error handling with retry mechanisms
 - **Enhanced Logging**: Detailed progress reporting and status updates
 - **Graceful Shutdown**: Proper resource cleanup and connection closure
-- **WebRTC-Ready Architecture**: Designed for distributed processing across multiple machines
-
-## 🏗️ Architecture
-
-### Current Mode: Single-Machine Distributed Processing
-The system currently runs multiple workers on the same machine, simulating distributed processing with:
-- Multiple worker processes with separate connections
-- Persistent WebRTC-style connections between workers and coordinator
-- Centralized result collection and monitoring
-- Independent worker lifecycle management
-
-### Future Mode: Multi-Machine Distributed Processing
-The architecture is designed to support true distributed processing across multiple machines:
-- Workers run on separate physical/virtual machines
-- WebRTC peer-to-peer connections between coordinator and remote workers
-- Distributed result collection and aggregation
-- Network-aware health monitoring and failure recovery
-
-**📋 For multi-machine setup, see [DISTRIBUTED_SETUP.md](DISTRIBUTED_SETUP.md)**
 
 ## 📋 Prerequisites
 
@@ -447,55 +428,6 @@ def process_file(input_file, output_file):
 # export IPD_EXTERNAL_SCRIPT_PATH=./custom_processor.py
 ```
 
-## 🌐 Running Workers on Separate Machines
-
-### Current Architecture
-The current system runs all workers on the same machine but is designed with WebRTC architecture for future distributed deployment.
-
-### Worker Node Mode (Experimental)
-You can run individual worker nodes on separate machines:
-
-#### On Worker Machine:
-```bash
-# Linux/macOS
-./start-worker-node.sh worker-1 ws://coordinator-ip:8000
-
-# Windows
-start-worker-node.bat worker-1 ws://coordinator-ip:8000
-```
-
-#### What Worker Nodes Do:
-- **Connect to Coordinator**: Establish WebRTC connection with main server
-- **Receive Work**: Get image processing tasks from coordinator
-- **Process Locally**: Run processing scripts on local machine
-- **Send Results**: Transmit processed results back to coordinator
-- **Health Monitoring**: Send heartbeats and status updates
-
-#### Worker Node Output:
-```
-==========================================
-IPD Enhanced Worker Node
-==========================================
-Worker ID: worker-machine1-12345
-Coordinator: ws://192.168.1.100:8000
-Signaling Server: ws://192.168.1.100:8000
-==========================================
-🔨 Building worker node application...
-✅ Build completed
-🚀 Starting worker node...
-🔗 Setting up remote connection to coordinator...
-✅ Connected to coordinator successfully
-💓 Worker worker-machine1-12345 heartbeat - Status: IDLE
-📡 Sending heartbeat to coordinator
-```
-
-### Full Distributed Setup
-For complete multi-machine distributed processing, see **[DISTRIBUTED_SETUP.md](DISTRIBUTED_SETUP.md)** which covers:
-- WebRTC signaling server setup
-- Network configuration
-- Security considerations
-- Production deployment strategies
-
 ## 🔍 Monitoring and Debugging
 
 ### Enable Debug Logging
@@ -530,7 +462,6 @@ curl http://localhost:9090/metrics
 
 - **QUICKSTART.md** - 5-minute setup guide
 - **DEPLOYMENT.md** - Production deployment guide
-- **DISTRIBUTED_SETUP.md** - Multi-machine distributed worker setup
 - **config-example.json** - Complete configuration template
 - **scripts/process.py** - Sample processing script
 
