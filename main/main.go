@@ -13,6 +13,13 @@ import (
 )
 
 func main() {
+	// Check if running in worker node mode
+	if os.Getenv("IPD_MODE") == "worker-node" {
+		fmt.Println("🚀 Starting in Worker Node Mode")
+		runWorkerNodeMode()
+		return
+	}
+
 	var wg sync.WaitGroup
 
 	// Load configuration
