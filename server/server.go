@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize: 1024,
 	WriteBufferSize: 1024,
@@ -17,99 +18,89 @@ var upgrader = websocket.Upgrader{
 }
 
 type comms_channel struct{
-	id_channel map[string] []chan string
-	mu sync.RWMutex
+	id_channel map[string] chan string
+	mu sync.Mutex
 }
-const(
-	RoleWorker string= "W"
-    RoleEdge   string= "E"
+
+const (
+	Edge string = "E"
+	Controller string = "C"
 )
-var Peer = comms_channel{id_channel: make(map[string] []chan string)}
+
+var Peer = comms_channel{id_channel: make(map[string] chan string)}
 
 func exchangeSDP(conn *websocket.Conn){
 	defer conn.Close()
-	_ , ct , err := conn.ReadMessage()
+
+	_ , role , err := conn.ReadMessage()
 	if err != nil{
-		log.Print("Error while reading id",err)
+		fmt.Print("Error while reading role",err)
 	}	
-	role := string(ct)
 
 	_ , id , err := conn.ReadMessage()
 	if err != nil{
-		log.Print("Error while reading id",err)
+		fmt.Print("Error while reading id",err)
 	}	
+
 	conn_id := string(id)
 	fmt.Println("id: ",conn_id) 
-
-	var comms_chl chan string
-
-	switch role{
-	case RoleWorker:
-
-		comms_chl = make(chan string)
-		Peer.mu.Lock()
-		comms_channels := Peer.id_channel[conn_id]
-		comms_channels = append(comms_channels, comms_chl)
-		Peer.id_channel[conn_id] = comms_channels
-		Peer.mu.Unlock()
-
-	case RoleEdge:
-		
-		Peer.mu.Lock()
-		n := len(Peer.id_channel[conn_id]) 
-		if n == 0{
-			log.Println("No worker remaining")
-			Peer.mu.Unlock()
-			return
-		}
-		comms_chl = Peer.id_channel[conn_id][n-1]
-		Peer.id_channel[conn_id] = Peer.id_channel[conn_id][:n-1]
-		Peer.mu.Unlock()
-	}
+	comms_channel := Peer.id_channel[conn_id]
 	
-	select{
-	case offer := <-comms_chl:
+	if comms_channel == nil{
+		fmt.Println("Creating new chat")
+		comms_channel = make(chan string)
+		Peer.mu.Lock()
+		Peer.id_channel[conn_id] = comms_channel
+		Peer.mu.Unlock()
+	}else{
+		fmt.Println("joined using conn_id ",conn_id)
+	}
+
+	
+	switch string(role){
+	case Edge:
+		offer := <-comms_channel
 		err := conn.WriteMessage(websocket.TextMessage, []byte(offer))
 		if err != nil{
-			log.Print("Error forwarding offer ", err)
+			fmt.Print("Error forwarding offer ", err)
 			return 
 		}
 		fmt.Println("Directing offer to peerB",string(offer))
 
 		_ , answer , err := conn.ReadMessage()
 		if err != nil{
-			log.Print("Error reading answer ", err)
+			fmt.Print("Error reading answer ", err)
 			return 
 		}
 		fmt.Println("Sending answer to peerA", string(answer))
-		comms_chl <- string(answer)
-		return
+		comms_channel <- string(answer)
 	
-	default:
+	case Controller:
 		_ , offer, err := conn.ReadMessage()
 		if err != nil{
-			log.Print("Error reading offer ", err)
+			fmt.Print("Error reading offer ", err)
 			return 
 		}
 		fmt.Println("Recieved Offer ", string(offer))
-		comms_chl <- string(offer)
+		comms_channel <- string(offer)
 
-		answer := <-comms_chl
+		answer := <-comms_channel
 		err = conn.WriteMessage(websocket.TextMessage, []byte(answer)) 
 		if err != nil{
-			log.Print("Error at writing answer ", err)
+			fmt.Print("Error at writing answer ", err)
 			return 
 		}
 		fmt.Println("Recieved answer from peerB", string(answer))
+	default:
+		fmt.Println("Unknown role")
+		return
 	}
-
-	
 }
 
 func wshandler(w http.ResponseWriter, r *http.Request){
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil{
-		log.Println("Couldnt upgrade to websocket ",err)
+		fmt.Println("Couldnt upgrade to websocket ",err)
 		return
 	}
 
