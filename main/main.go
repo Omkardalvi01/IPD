@@ -4,115 +4,116 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
-	"runtime"
+	"strings"
 	"sync"
 
-	"github.com/gorilla/websocket"
-)
-const(
-	Role = "C"
+	"github.com/Omkardalvi01/IPD/networking"
+	"github.com/pion/webrtc/v3"
 )
 
-type allocation struct{
-	Uids map[string]int `json:"allocation"`
+type result_state int
+const(
+	SUCCESS result_state = 0
+	FAILURE result_state = -1 
+	END string = "EOF"
+)
+
+type Result struct{
+	worker_id int
+	result result_state
 }
 
-func main(){
-	var wg sync.WaitGroup
-	// var dir string
-	// fmt.Print("Provide dir path: ")
-	// fmt.Scan(&dir)
-	dir := "./test"
-	
-	f, err := os.Open(dir)
-	if err != nil {
-		log.Fatal("Error while opening file",err)
-	}
-	defer f.Close()
+type Request struct{
+	f *os.File
+}
 
-	n, files, err :=  get_data(f)
-	if err != nil {
-		log.Fatal("Error while reading dir", err)
-	}
+type Worker struct{
+	req_chan chan Request
+	res_chan chan<- Result
+	conn_id string
+	worker_id int
+	current int
+	weight int
+}
 
-	var numWorkers int
-	MaxWorkers := runtime.NumCPU()
-	fmt.Printf("Enter number of workers(recommended less than %d for your device)\n Workers:",MaxWorkers)
-	fmt.Scan(&numWorkers)
+func (w Worker) start(wg *sync.WaitGroup){
 
-	room_id := create_uid()
-	fmt.Println("Connection_id:",room_id)
+	// uid := create_uid()
+	// fmt.Printf("uid for worker %d : %s \n",w.worker_id, uid)
+	var stop_worker chan struct{}
 
-	postbody := map[string]interface{}{
-		"role": Role,
-		"room_id": room_id,
-		"num_edges" : numWorkers,
-	}
-
+	peer ,dc , err := networking.Peerconnection(w.conn_id)
 	if err != nil{
-		log.Fatal("Error while creating postbody")
+		log.Printf("Error with peer connection in worker %d", w.worker_id)
+		return 
 	}
+	defer dc.Close()
+	defer peer.Close()
 
-	edge_id := make([]string,0)
+	wg.Done()
 
-	var allocate allocation
-	
-	algo_service , _, err := websocket.DefaultDialer.Dial("ws://localhost:5000/join", nil)
-	if err != nil{
-		log.Fatal("Error while creating connection to algorithm service", err)
-	}
+	dc.OnOpen(func() {
+		fmt.Println("Data channel Open")
+		for r := range w.req_chan {
 
-	err = algo_service.WriteJSON(postbody)
-	if err != nil{
-		log.Fatal("Error while writing to connection", err)
-	}
+			file_name := strings.Split(r.f.Name(), "/")[1]
+			dc.SendText(file_name)
 
-	err = algo_service.ReadJSON(&allocate)
-	if err != nil{
-		log.Println("Error while reading from connection ", err)
-	}
-	fmt.Println("Response from algo service ",allocate)	
-	
-	for id := range allocate.Uids{
-		edge_id = append(edge_id, id)
-	}
+			img , err := get_img_data(r.f.Name()) 
+			if err != nil{
+				log.Fatal("Error while get image data", err)
+			}
 
-	for _, id := range edge_id{
-		fmt.Printf("ID:%s Weights:%d\n",id,allocate.Uids[id])
-	}
+			err = dc.Send(img)
+			if err != nil{
+				log.Fatal("Error while sending image data", err)
+			}
+			
+			dc.SendText(END)
 
-	resultchan := make(chan Result)
-	wp := Workerpool{resultchan: resultchan}	
-	
-	wp.start_pool(numWorkers, edge_id, allocate.Uids, &wg)
-
-	go func(){
-		i := 1
-		for result := range resultchan{
-			fmt.Printf("worker: %d status: %v uploaded: %d/%d\n", result.worker_id, result.result, i, n )
-			i++
+			w.res_chan <- Result{worker_id: w.worker_id, result: SUCCESS}
+			r.f.Close()
+			
 		}
-	}()
-
-	wg.Wait()
-	for _ , file_entries := range files{
-		file_path := filepath.Join(dir ,file_entries.Name())
+		stop_worker <- struct{}{}
 		
-		file , err := os.Open(file_path)
-		if err != nil {
-			log.Printf("Error while reading file %s error %v\n", file_path, err)
-			continue
+	})
+	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+		fmt.Println(string(msg.Data))
+		
+	})
+	<-stop_worker
+}
+
+type Workerpool struct{
+	resultchan chan<- Result
+	workers []*Worker
+	num_workers int
+}
+
+func (wp *Workerpool) start_pool(n int, id []string, weights map[string]int, wg *sync.WaitGroup) {
+	wp.num_workers = n
+	for i := 0 ; i < n ; i++ {
+		w := Worker{worker_id: i, req_chan: make(chan Request), res_chan: wp.resultchan, conn_id: id[i], weight: weights[id[i]], current: 0}
+		wp.workers = append(wp.workers, &w)
+		wg.Add(1)
+		go w.start(wg)
+	}
+}
+
+func (wp *Workerpool) pickWorker() *Worker{
+	var best *Worker
+	total := 0
+
+	for _, w := range wp.workers{
+		w.current += w.weight
+		total += w.weight
+		if best == nil || w.current > best.current{
+			best = w
 		}
-		
-		worker := wp.pickWorker()
-		worker.req_chan <- Request{f: file}
 	}
 
-	for i := 0; i < numWorkers; i++ {
-		close(wp.workers[i].req_chan)
-	}
-
-	select{}
+	best.current -= total
+	return best
 
 }
