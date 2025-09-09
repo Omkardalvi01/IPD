@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -78,10 +79,107 @@ func (w Worker) start(wg *sync.WaitGroup){
 		stop_worker <- struct{}{}
 		
 	})
+	// Create output directory if it doesn't exist
+	outputDir := "./outputs"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		log.Printf("Failed to create output directory: %v", err)
+	} else {
+		log.Printf("Output directory ready: %s", outputDir)
+	}
+
+	var (
+		currentFile     *os.File
+		currentFileName string
+		totalReceived   int64
+	)
+
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		fmt.Println(string(msg.Data))
-		
+		if msg.IsString {
+			msgText := string(msg.Data)
+			switch {
+			case strings.HasPrefix(msgText, "DHAK-DHAK"):
+				// This is a heartbeat message
+				log.Printf("Heartbeat received: %s", msgText)
+
+			case strings.HasPrefix(msgText, "FILE:"):
+				// Start of a new file
+				if currentFile != nil {
+					log.Printf("Warning: Previous file %s not properly closed", currentFileName)
+					currentFile.Close()
+					currentFile = nil
+				}
+
+				currentFileName = strings.TrimPrefix(msgText, "FILE:")
+				filePath := filepath.Join(outputDir, currentFileName)
+				
+				// Create parent directories if they don't exist
+				if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+					log.Printf("Error creating directory: %v", err)
+					return
+				}
+				
+				log.Printf("Starting to receive file: %s", currentFileName)
+				
+				var err error
+				currentFile, err = os.Create(filePath)
+				if err != nil {
+					log.Printf("Error creating file %s: %v", filePath, err)
+					return
+				}
+				totalReceived = 0
+				log.Printf("Ready to receive data for file: %s", filePath)
+
+			case strings.HasPrefix(msgText, "FILE_END:"):
+				// End of file
+				expectedFile := strings.TrimPrefix(msgText, "FILE_END:")
+				if currentFile != nil {
+					if currentFileName != expectedFile {
+						log.Printf("Warning: File end marker mismatch. Expected %s, got %s", currentFileName, expectedFile)
+					}
+					err := currentFile.Sync() // Ensure all data is written to disk
+					if err != nil {
+						log.Printf("Error syncing file %s: %v", currentFileName, err)
+					}
+					currentFile.Close()
+					log.Printf("Successfully received file: %s (%d bytes)", currentFileName, totalReceived)
+					currentFile = nil
+					totalReceived = 0
+				} else {
+					log.Printf("Received FILE_END but no file is currently being received")
+				}
+
+			default:
+				log.Printf("Received message: %s", msgText)
+			}
+		} else {
+			// Handle binary data (file chunks)
+			if currentFile != nil {
+				n, err := currentFile.Write(msg.Data)
+				if err != nil {
+					log.Printf("Error writing to file: %v", err)
+					currentFile.Close()
+					currentFile = nil
+					return
+				}
+				totalReceived += int64(n)
+				if totalReceived%(1024*1024) == 0 { // Log every 1MB
+					log.Printf("Received %d bytes for %s", totalReceived, currentFileName)
+				}
+			} else {
+				log.Printf("Received unexpected binary data without FILE: prefix, size: %d bytes", len(msg.Data))
+			}
+		}
 	})
+
+	// Clean up on connection close
+	dc.OnClose(func() {
+		log.Printf("Data channel closed")
+		if currentFile != nil {
+			currentFile.Close()
+			currentFile = nil
+		}
+	})
+
 	<-stop_worker
 }
 
