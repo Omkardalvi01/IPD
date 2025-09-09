@@ -23,7 +23,7 @@ func main(){
 	// var dir string
 	// fmt.Print("Provide dir path: ")
 	// fmt.Scan(&dir)
-	dir := "./train"
+	dir := "./test"
 	
 	f, err := os.Open(dir)
 	if err != nil {

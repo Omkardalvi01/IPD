@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/Omkardalvi01/IPD/networking"
+	"github.com/pion/webrtc/v3"
 )
 
 type result_state int
@@ -36,9 +37,11 @@ type Worker struct{
 }
 
 func (w Worker) start(wg *sync.WaitGroup){
+
 	// uid := create_uid()
 	// fmt.Printf("uid for worker %d : %s \n",w.worker_id, uid)
 	var stop_worker chan struct{}
+
 	peer ,dc , err := networking.Peerconnection(w.conn_id)
 	if err != nil{
 		log.Printf("Error with peer connection in worker %d", w.worker_id)
@@ -73,6 +76,10 @@ func (w Worker) start(wg *sync.WaitGroup){
 			
 		}
 		stop_worker <- struct{}{}
+		
+	})
+	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+		fmt.Println(string(msg.Data))
 		
 	})
 	<-stop_worker

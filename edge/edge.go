@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
+
 	"github.com/Omkardalvi01/IPD/networking"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -16,6 +18,7 @@ import (
 const(
 	Role string = "E"
 	END string = "EOF"
+	Pulse string = "DHAK-DHAK"
 )
 
 func id_maker() string{
@@ -89,14 +92,23 @@ func main(){
 
 		dc.OnOpen(func() {
 			fmt.Println("Connected to peer. Type messages:")
+			tmx := time.NewTicker(time.Millisecond * 2000)
 
-			go func() {
-				var msg string
-				for {
-					fmt.Scan(&msg)
-					dc.SendText(msg)
-				}
-			}()
+			// var msg string
+			for{
+				<-tmx.C
+				dc.SendText(Pulse)
+			}
+			// for{
+			// 	select{
+			// 	case <-tmx.C:
+			// 		dc.SendText(Pulse)
+			// 	default:
+			// 		fmt.Scan(&msg)
+			// 		dc.SendText(msg)
+			// 	}
+			// }
+
 		})
 
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
