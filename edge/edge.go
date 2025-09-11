@@ -34,7 +34,7 @@ func id_maker() string {
 	return u.String()
 }
 
-func sendFileToServer(filePath string, dc *webrtc.DataChannel) error {
+func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	log.Printf("Attempting to send file: %s", filePath)
 	
 	file, err := os.Open(filePath)
@@ -56,7 +56,9 @@ func sendFileToServer(filePath string, dc *webrtc.DataChannel) error {
 	log.Printf("Sending file metadata - Name: %s, Size: %d bytes", fileName, fileInfo.Size())
 	
 	// Send file marker and name
-	err = dc.SendText("FILE:" + fileName)
+	sendfilename := fmt.Sprintf("%s.txt",uid)
+	err = dc.SendText("FILE:" + sendfilename)
+	
 	if err != nil {
 		log.Printf("Failed to send file marker: %v", err)
 		return fmt.Errorf("failed to send file marker: %v", err)
@@ -88,7 +90,7 @@ func sendFileToServer(filePath string, dc *webrtc.DataChannel) error {
 	}
 
 	// Send end of file marker
-	err = dc.SendText("FILE_END:" + fileName)
+	err = dc.SendText("FILE_END:" + sendfilename)
 	if err != nil {
 		log.Printf("Failed to send file end marker: %v", err)
 		return fmt.Errorf("failed to send file end marker: %v", err)
@@ -143,7 +145,7 @@ func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
 
 	// Send the output file back to the server
 	if dc != nil && dc.ReadyState() == webrtc.DataChannelStateOpen {
-		err = sendFileToServer(outputPath, dc)
+		err = sendFileToServer(edgeID, outputPath, dc)
 		if err != nil {
 			return fmt.Errorf("failed to send file to server: %v", err)
 		}

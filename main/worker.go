@@ -13,6 +13,7 @@ import (
 )
 
 type result_state int
+
 const(
 	SUCCESS result_state = 0
 	FAILURE result_state = -1 
@@ -37,11 +38,10 @@ type Worker struct{
 	weight int
 }
 
-func (w Worker) start(wg *sync.WaitGroup){
+func (w Worker) start(wg1, wg2 *sync.WaitGroup ){
+	defer wg2.Done()
 
-	// uid := create_uid()
-	// fmt.Printf("uid for worker %d : %s \n",w.worker_id, uid)
-	var stop_worker chan struct{}
+	stop_worker := make(chan struct{})
 
 	peer ,dc , err := networking.Peerconnection(w.conn_id)
 	if err != nil{
@@ -51,7 +51,7 @@ func (w Worker) start(wg *sync.WaitGroup){
 	defer dc.Close()
 	defer peer.Close()
 
-	wg.Done()
+	wg1.Done()
 
 	dc.OnOpen(func() {
 		fmt.Println("Data channel Open")
@@ -76,7 +76,6 @@ func (w Worker) start(wg *sync.WaitGroup){
 			r.f.Close()
 			
 		}
-		stop_worker <- struct{}{}
 		
 	})
 	// Create output directory if it doesn't exist
@@ -112,11 +111,7 @@ func (w Worker) start(wg *sync.WaitGroup){
 				currentFileName = strings.TrimPrefix(msgText, "FILE:")
 				filePath := filepath.Join(outputDir, currentFileName)
 				
-				// Create parent directories if they don't exist
-				if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-					log.Printf("Error creating directory: %v", err)
-					return
-				}
+				
 				
 				log.Printf("Starting to receive file: %s", currentFileName)
 				
@@ -144,10 +139,12 @@ func (w Worker) start(wg *sync.WaitGroup){
 					log.Printf("Successfully received file: %s (%d bytes)", currentFileName, totalReceived)
 					currentFile = nil
 					totalReceived = 0
+					stop_worker <- struct{}{}
 				} else {
 					log.Printf("Received FILE_END but no file is currently being received")
 				}
 
+				
 			default:
 				log.Printf("Received message: %s", msgText)
 			}
@@ -189,13 +186,14 @@ type Workerpool struct{
 	num_workers int
 }
 
-func (wp *Workerpool) start_pool(n int, id []string, weights map[string]int, wg *sync.WaitGroup) {
+func (wp *Workerpool) start_pool(n int, id []string, weights map[string]int, edges , worker_done *sync.WaitGroup) {
 	wp.num_workers = n
 	for i := 0 ; i < n ; i++ {
 		w := Worker{worker_id: i, req_chan: make(chan Request), res_chan: wp.resultchan, conn_id: id[i], weight: weights[id[i]], current: 0}
 		wp.workers = append(wp.workers, &w)
-		wg.Add(1)
-		go w.start(wg)
+		edges.Add(1)
+		worker_done.Add(1)
+		go w.start(edges, worker_done)
 	}
 }
 

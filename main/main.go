@@ -1,119 +1,146 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
-	"strings"
+	"path/filepath"
+	"runtime"
 	"sync"
 
-	"github.com/Omkardalvi01/IPD/networking"
-	"github.com/pion/webrtc/v3"
+	"github.com/gorilla/websocket"
 )
-
-type result_state int
 const(
-	SUCCESS result_state = 0
-	FAILURE result_state = -1 
-	END string = "EOF"
+	Role = "C"
 )
 
-type Result struct{
-	worker_id int
-	result result_state
+type allocation struct{
+	Uids map[string]int `json:"allocation"`
 }
 
-type Request struct{
-	f *os.File
+type aggregator struct{
+	NumEdges int `json:"numEdges"`
+	UIDandPercent map[string]int `json:"file_and_weight"`
 }
 
-type Worker struct{
-	req_chan chan Request
-	res_chan chan<- Result
-	conn_id string
-	worker_id int
-	current int
-	weight int
-}
+func main(){
+	var edge_connection sync.WaitGroup
+	var worker_done sync.WaitGroup
+	// var dir string
+	// fmt.Print("Provide dir path: ")
+	// fmt.Scan(&dir)
+	dir := "./test"
+	
+	f, err := os.Open(dir)
+	if err != nil {
+		log.Fatal("Error while opening file",err)
+	}
+	defer f.Close()
 
-func (w Worker) start(wg *sync.WaitGroup){
+	n, files, err :=  get_data(f)
+	if err != nil {
+		log.Fatal("Error while reading dir", err)
+	}
 
-	// uid := create_uid()
-	// fmt.Printf("uid for worker %d : %s \n",w.worker_id, uid)
-	var stop_worker chan struct{}
+	var numWorkers int
+	MaxWorkers := runtime.NumCPU()
+	fmt.Printf("Enter number of workers(recommended less than %d for your device)\n Workers:",MaxWorkers)
+	fmt.Scan(&numWorkers)
 
-	peer ,dc , err := networking.Peerconnection(w.conn_id)
+	room_id := create_uid()
+	fmt.Println("Connection_id:",room_id)
+
+	postbody := map[string]interface{}{
+		"role": Role,
+		"room_id": room_id,
+		"num_edges" : numWorkers,
+	}
+
 	if err != nil{
-		log.Printf("Error with peer connection in worker %d", w.worker_id)
-		return 
+		log.Fatal("Error while creating postbody")
 	}
-	defer dc.Close()
-	defer peer.Close()
 
-	wg.Done()
+	edge_id := make([]string,0)
 
-	dc.OnOpen(func() {
-		fmt.Println("Data channel Open")
-		for r := range w.req_chan {
+	var allocate allocation
+	
+	algo_service , _, err := websocket.DefaultDialer.Dial("ws://localhost:5000/join", nil)
+	if err != nil{
+		log.Fatal("Error while creating connection to algorithm service", err)
+	}
 
-			file_name := strings.Split(r.f.Name(), "/")[1]
-			dc.SendText(file_name)
+	err = algo_service.WriteJSON(postbody)
+	if err != nil{
+		log.Fatal("Error while writing to connection", err)
+	}
 
-			img , err := get_img_data(r.f.Name()) 
-			if err != nil{
-				log.Fatal("Error while get image data", err)
-			}
+	err = algo_service.ReadJSON(&allocate)
+	if err != nil{
+		log.Println("Error while reading from connection ", err)
+	}
+	fmt.Println("Response from algo service ",allocate)	
+	
+	for id := range allocate.Uids{
+		edge_id = append(edge_id, id)
+	}
 
-			err = dc.Send(img)
-			if err != nil{
-				log.Fatal("Error while sending image data", err)
-			}
-			
-			dc.SendText(END)
+	for _, id := range edge_id{
+		fmt.Printf("ID:%s Weights:%d\n",id,allocate.Uids[id])
+	}
 
-			w.res_chan <- Result{worker_id: w.worker_id, result: SUCCESS}
-			r.f.Close()
-			
+	resultchan := make(chan Result)
+	wp := Workerpool{resultchan: resultchan}	
+	
+	wp.start_pool(numWorkers, edge_id, allocate.Uids, &edge_connection, &worker_done)
+
+	go func(){
+		i := 1
+		for result := range resultchan{
+			fmt.Printf("worker: %d status: %v uploaded: %d/%d\n", result.worker_id, result.result, i, n )
+			i++
 		}
-		stop_worker <- struct{}{}
+	}()
+
+	edge_connection.Wait()
+	for _ , file_entries := range files{
+		file_path := filepath.Join(dir ,file_entries.Name())
 		
-	})
-	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		fmt.Println(string(msg.Data))
-		
-	})
-	<-stop_worker
-}
-
-type Workerpool struct{
-	resultchan chan<- Result
-	workers []*Worker
-	num_workers int
-}
-
-func (wp *Workerpool) start_pool(n int, id []string, weights map[string]int, wg *sync.WaitGroup) {
-	wp.num_workers = n
-	for i := 0 ; i < n ; i++ {
-		w := Worker{worker_id: i, req_chan: make(chan Request), res_chan: wp.resultchan, conn_id: id[i], weight: weights[id[i]], current: 0}
-		wp.workers = append(wp.workers, &w)
-		wg.Add(1)
-		go w.start(wg)
-	}
-}
-
-func (wp *Workerpool) pickWorker() *Worker{
-	var best *Worker
-	total := 0
-
-	for _, w := range wp.workers{
-		w.current += w.weight
-		total += w.weight
-		if best == nil || w.current > best.current{
-			best = w
+		file , err := os.Open(file_path)
+		if err != nil {
+			log.Printf("Error while reading file %s error %v\n", file_path, err)
+			continue
 		}
+		
+		worker := wp.pickWorker()
+		worker.req_chan <- Request{f: file}
 	}
 
-	best.current -= total
-	return best
+	for i := 0; i < numWorkers; i++ {
+		close(wp.workers[i].req_chan)
+	}
+
+	worker_done.Wait()
+	var agg_file = aggregator{
+		NumEdges: numWorkers,
+		UIDandPercent: allocate.Uids,
+	}
+
+	agg_req_body, err := json.Marshal(agg_file)
+	if err != nil{
+		log.Print("Error while converting into json ",err)
+	}
+
+	resp, err := http.Post("http://localhost:8000","application/json",bytes.NewBuffer(agg_req_body))
+	if err != nil{
+		log.Print("Error while posting to aggregator",err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("Response Body:%s Response Status:%s",resp.Body, resp.Status)
+	select{}
+
 
 }
