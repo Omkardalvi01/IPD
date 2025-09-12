@@ -24,7 +24,7 @@ type aggregator struct{
 }
 
 var ( 
-ALGO_LIVE_LINK = "wss://allocator-zt0n.onrender.com"
+ALGO_LIVE_LINK = "wss://ipd-allocator-yz2k.onrender.com"
 ALGO_TEST_LINK = "ws://localhost:13000/join"
 )
 
@@ -63,7 +63,7 @@ func main(){
 
 	var allocate allocation
 	
-	algo_service , _, err := websocket.DefaultDialer.Dial(ALGO_LIVE_LINK, nil)
+	algo_service , _, err := websocket.DefaultDialer.Dial(ALGO_TEST_LINK, nil)
 	if err != nil{
 		log.Fatal("Error while creating connection to algorithm service", err)
 	}

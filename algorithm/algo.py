@@ -2,17 +2,30 @@ import asyncio
 import websockets
 import json
 import logging
-import os
 
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-PORT = int(os.getenv("PORT", 13000))
 
 # --- In-Memory State ---
+# This will store our rooms. A more robust solution might use Redis.
+# "rooms" format:
+# {
+#     "room_id_1": {
+#         "controller_socket": ws,
+#         "num_edges": 4,
+#         "connected_edges": {
+#             "edge_uuid_1": ws,
+#             "edge_uuid_2": ws,
+#         }
+#     }
+# }
 rooms = {}
+# Locks to prevent race conditions when modifying a room's state
 room_locks = {}
 
+
 async def unregister_client(room_id, edge_id=None):
+    """Safely unregisters a controller or an edge and cleans up the room if necessary."""
     if room_id not in room_locks:
         return
 
@@ -26,10 +39,15 @@ async def unregister_client(room_id, edge_id=None):
                 logging.info(f"Edge '{edge_id}' disconnected from room '{room_id}'.")
         else:  # Unregistering a controller
             logging.info(f"Controller for room '{room_id}' disconnected. Closing room.")
+            # In a real-world scenario, you might want to notify edges here.
             del rooms[room_id]
             del room_locks[room_id]
 
 async def check_and_notify_controller(room_id):
+    """
+    Checks if a room is full. If so, calculates allocation and sends it
+    to the controller.
+    """
     if room_id not in rooms:
         return
 
@@ -41,10 +59,12 @@ async def check_and_notify_controller(room_id):
 
     if num_edges_connected == num_edges_expected:
         logging.info(f"Room '{room_id}' is full. Sending allocation to controller.")
-
+        
+        # Calculate a simple percentage-based allocation.
+        # Ensure at least 1% for each, distribute remainder.
         percentage = 100 // num_edges_expected
         remainder = 100 % num_edges_expected
-
+        
         allocation_data = {}
         edge_ids = list(room["connected_edges"].keys())
 
@@ -54,7 +74,9 @@ async def check_and_notify_controller(room_id):
                 alloc += 1
             allocation_data[edge_id] = alloc
 
-        payload = {"allocation": allocation_data}
+        payload = {
+            "allocation": allocation_data
+        }
 
         try:
             controller_socket = room["controller_socket"]
@@ -65,7 +87,9 @@ async def check_and_notify_controller(room_id):
         except Exception as e:
             logging.error(f"Failed to send allocation to controller for room '{room_id}': {e}")
 
+
 async def handler(ws):
+    """Main WebSocket connection handler."""
     client_info = {"type": None, "room_id": None, "edge_id": None}
     try:
         initial_msg = await ws.recv()
@@ -80,18 +104,20 @@ async def handler(ws):
 
         client_info["room_id"] = room_id
 
-        if role == "C":  # Controller
+        # --- Handle Controller Registration ---
+        if role == "C":
             client_info["type"] = "controller"
             num_edges = int(data.get("num_edges", 0))
 
+            # Create a lock for the new room if it doesn't exist
             if room_id not in room_locks:
                 room_locks[room_id] = asyncio.Lock()
-
+            
             async with room_locks[room_id]:
                 if room_id in rooms:
                     await ws.close(1008, f"Room '{room_id}' already exists.")
                     return
-
+                
                 rooms[room_id] = {
                     "controller_socket": ws,
                     "num_edges": num_edges,
@@ -99,13 +125,14 @@ async def handler(ws):
                 }
             logging.info(f"Controller registered for room '{room_id}', expecting {num_edges} edges.")
 
-        elif role == "E":  # Edge
+        # --- Handle Edge Registration ---
+        elif role == "E":
             client_info["type"] = "edge"
             edge_id = data.get("edge_id")
             if not edge_id:
                 await ws.close(1008, "edge_id is required for role 'E'.")
                 return
-
+            
             client_info["edge_id"] = edge_id
 
             if room_id not in room_locks:
@@ -115,27 +142,31 @@ async def handler(ws):
 
             async with room_locks[room_id]:
                 if room_id not in rooms:
-                    await ws.send(json.dumps({"error": f"Room '{room_id}' not found."}))
-                    await ws.close()
-                    return
+                     await ws.send(json.dumps({"error": f"Room '{room_id}' not found."}))
+                     await ws.close()
+                     return
 
                 room = rooms[room_id]
                 if len(room["connected_edges"]) >= room["num_edges"]:
                     await ws.send(json.dumps({"error": f"Room '{room_id}' is already full."}))
                     await ws.close()
                     return
-
+                
                 room["connected_edges"][edge_id] = ws
                 await ws.send(json.dumps({"status": "successfully joined room"}))
-
+            
+            # Check if the room is now full and notify the controller
             await check_and_notify_controller(room_id)
-
+        
         else:
             await ws.close(1008, f"Unknown role: {role}")
             return
-
+        
+        # Keep the connection alive to detect disconnects
         async for message in ws:
+            # You can handle further communication here if needed
             logging.info(f"Received message from {client_info}: {message}")
+
 
     except websockets.exceptions.ConnectionClosedOK:
         logging.info(f"Client {client_info} disconnected gracefully.")
@@ -144,38 +175,20 @@ async def handler(ws):
     except json.JSONDecodeError:
         logging.error("Failed to decode JSON from client.")
     except Exception as e:
-        logging.error(f"Unexpected error with {client_info}: {e}", exc_info=True)
+        logging.error(f"An unexpected error occurred with {client_info}: {e}", exc_info=True)
     finally:
+        # Cleanup on disconnect
         if client_info["room_id"]:
             if client_info["type"] == "controller":
                 await unregister_client(client_info["room_id"])
             elif client_info["type"] == "edge":
                 await unregister_client(client_info["room_id"], client_info["edge_id"])
 
-def health_check_handler(connection, request):
-    """Simple health check handler that responds to HEAD/GET requests"""
-    if request.method in ["GET", "HEAD"] and request.path == "/":
-        response = (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 2\r\n"
-            "\r\n"
-            "OK"
-        )
-        return response.encode()
-    return None
 
 async def main():
-    logging.info(f"Starting WebSocket server on ws://0.0.0.0:{PORT}")
-    try:
-        # Try with process_request parameter (newer versions)
-        async with websockets.serve(handler, "0.0.0.0", PORT, process_request=health_check_handler):
-            await asyncio.Future()
-    except TypeError:
-        # Fallback for older versions without process_request
-        logging.info("Using fallback WebSocket server (no health check support)")
-        async with websockets.serve(handler, "0.0.0.0", PORT):
-            await asyncio.Future()
+    logging.info("Starting WebSocket server on ws://localhost:13000")
+    async with websockets.serve(handler, "localhost", 13000):
+        await asyncio.Future()  # run forever
 
 if __name__ == "__main__":
     asyncio.run(main())
