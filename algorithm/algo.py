@@ -3,10 +3,12 @@ import websockets
 import json
 import logging
 import os
+from websockets.asyncio.server import serve
+from websockets.http import Request, Response
 
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-PORT = int(os.getenv("PORT", 5000))
+PORT = int(os.getenv("PORT", 13000))
 
 # --- In-Memory State ---
 rooms = {}
@@ -152,9 +154,17 @@ async def handler(ws):
             elif client_info["type"] == "edge":
                 await unregister_client(client_info["room_id"], client_info["edge_id"])
 
+def process_request(connection, request):
+    """Handle HTTP requests (like health checks) before WebSocket upgrade"""
+    if request.method in ["GET", "HEAD"] and request.path == "/":
+        # Return a simple HTTP response for health checks
+        return Response(200, "OK", b"WebSocket Server Running\n")
+    # Return None to proceed with WebSocket handshake for other requests
+    return None
+
 async def main():
     logging.info(f"Starting WebSocket server on ws://0.0.0.0:{PORT}")
-    async with websockets.serve(handler, "0.0.0.0", PORT):
+    async with serve(handler, "0.0.0.0", PORT, process_request=process_request):
         await asyncio.Future()  # run forever
 
 if __name__ == "__main__":
