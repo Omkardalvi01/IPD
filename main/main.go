@@ -23,6 +23,11 @@ type aggregator struct{
 	UIDandPercent map[string]int `json:"file_and_weight"`
 }
 
+var ( 
+ALGO_LIVE_LINK = "wss://allocator-zt0n.onrender.com"
+ALGO_TEST_LINK = "ws://localhost:13000/join"
+)
+
 func main(){
 	var edge_connection sync.WaitGroup
 	var worker_done sync.WaitGroup
@@ -58,7 +63,7 @@ func main(){
 
 	var allocate allocation
 	
-	algo_service , _, err := websocket.DefaultDialer.Dial("ws://localhost:5000/join", nil)
+	algo_service , _, err := websocket.DefaultDialer.Dial(ALGO_LIVE_LINK, nil)
 	if err != nil{
 		log.Fatal("Error while creating connection to algorithm service", err)
 	}

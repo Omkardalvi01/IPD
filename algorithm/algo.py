@@ -3,8 +3,6 @@ import websockets
 import json
 import logging
 import os
-from websockets.asyncio.server import serve
-from websockets.http import Request, Response
 
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -154,18 +152,30 @@ async def handler(ws):
             elif client_info["type"] == "edge":
                 await unregister_client(client_info["room_id"], client_info["edge_id"])
 
-def process_request(connection, request):
-    """Handle HTTP requests (like health checks) before WebSocket upgrade"""
+def health_check_handler(connection, request):
+    """Simple health check handler that responds to HEAD/GET requests"""
     if request.method in ["GET", "HEAD"] and request.path == "/":
-        # Return a simple HTTP response for health checks
-        return Response(200, "OK", b"WebSocket Server Running\n")
-    # Return None to proceed with WebSocket handshake for other requests
+        response = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "OK"
+        )
+        return response.encode()
     return None
 
 async def main():
     logging.info(f"Starting WebSocket server on ws://0.0.0.0:{PORT}")
-    async with serve(handler, "0.0.0.0", PORT, process_request=process_request):
-        await asyncio.Future()  # run forever
+    try:
+        # Try with process_request parameter (newer versions)
+        async with websockets.serve(handler, "0.0.0.0", PORT, process_request=health_check_handler):
+            await asyncio.Future()
+    except TypeError:
+        # Fallback for older versions without process_request
+        logging.info("Using fallback WebSocket server (no health check support)")
+        async with websockets.serve(handler, "0.0.0.0", PORT):
+            await asyncio.Future()
 
 if __name__ == "__main__":
     asyncio.run(main())

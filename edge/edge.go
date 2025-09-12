@@ -34,6 +34,11 @@ func id_maker() string {
 	return u.String()
 }
 
+var(
+	 ALGO_LIVE_LINK = "wss://allocator-zt0n.onrender.com"
+ 	ALGO_TEST_LINK = "ws://localhost:13000/join"
+)
+
 func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	log.Printf("Attempting to send file: %s", filePath)
 	
@@ -180,7 +185,7 @@ func main() {
 		"edge_id": edge_id,
 	}
 
-	algo_service, _, err := websocket.DefaultDialer.Dial("ws://localhost:5000/join", nil)
+	algo_service, _, err := websocket.DefaultDialer.Dial(ALGO_LIVE_LINK, nil)
 	if err != nil {
 		log.Fatal("Error while creating connection to algorithm service", err)
 	}

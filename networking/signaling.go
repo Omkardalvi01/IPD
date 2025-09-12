@@ -10,7 +10,7 @@ var TEST_LINK = "ws://localhost:10000/"
 var LIVE_LINK = "wss://sdp-server-1.onrender.com"
 
 func Createconnection() (*websocket.Conn, error){
-	conn, _ , err := websocket.DefaultDialer.Dial(TEST_LINK, nil)
+	conn, _ , err := websocket.DefaultDialer.Dial(LIVE_LINK, nil)
 	if err != nil{
 		log.Println("Error while creating connection in signaling.go", err)
 		return nil , err
