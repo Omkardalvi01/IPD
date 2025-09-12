@@ -2,25 +2,13 @@ import asyncio
 import websockets
 import json
 import logging
+import os
 
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- In-Memory State ---
-# This will store our rooms. A more robust solution might use Redis.
-# "rooms" format:
-# {
-#     "room_id_1": {
-#         "controller_socket": ws,
-#         "num_edges": 4,
-#         "connected_edges": {
-#             "edge_uuid_1": ws,
-#             "edge_uuid_2": ws,
-#         }
-#     }
-# }
 rooms = {}
-# Locks to prevent race conditions when modifying a room's state
 room_locks = {}
 
 
@@ -39,15 +27,12 @@ async def unregister_client(room_id, edge_id=None):
                 logging.info(f"Edge '{edge_id}' disconnected from room '{room_id}'.")
         else:  # Unregistering a controller
             logging.info(f"Controller for room '{room_id}' disconnected. Closing room.")
-            # In a real-world scenario, you might want to notify edges here.
             del rooms[room_id]
             del room_locks[room_id]
 
+
 async def check_and_notify_controller(room_id):
-    """
-    Checks if a room is full. If so, calculates allocation and sends it
-    to the controller.
-    """
+    """Checks if a room is full. If so, calculates allocation and sends it to the controller."""
     if room_id not in rooms:
         return
 
@@ -60,8 +45,6 @@ async def check_and_notify_controller(room_id):
     if num_edges_connected == num_edges_expected:
         logging.info(f"Room '{room_id}' is full. Sending allocation to controller.")
         
-        # Calculate a simple percentage-based allocation.
-        # Ensure at least 1% for each, distribute remainder.
         percentage = 100 // num_edges_expected
         remainder = 100 % num_edges_expected
         
@@ -74,9 +57,7 @@ async def check_and_notify_controller(room_id):
                 alloc += 1
             allocation_data[edge_id] = alloc
 
-        payload = {
-            "allocation": allocation_data
-        }
+        payload = {"allocation": allocation_data}
 
         try:
             controller_socket = room["controller_socket"]
@@ -109,7 +90,6 @@ async def handler(ws):
             client_info["type"] = "controller"
             num_edges = int(data.get("num_edges", 0))
 
-            # Create a lock for the new room if it doesn't exist
             if room_id not in room_locks:
                 room_locks[room_id] = asyncio.Lock()
             
@@ -155,18 +135,14 @@ async def handler(ws):
                 room["connected_edges"][edge_id] = ws
                 await ws.send(json.dumps({"status": "successfully joined room"}))
             
-            # Check if the room is now full and notify the controller
             await check_and_notify_controller(room_id)
         
         else:
             await ws.close(1008, f"Unknown role: {role}")
             return
         
-        # Keep the connection alive to detect disconnects
         async for message in ws:
-            # You can handle further communication here if needed
             logging.info(f"Received message from {client_info}: {message}")
-
 
     except websockets.exceptions.ConnectionClosedOK:
         logging.info(f"Client {client_info} disconnected gracefully.")
@@ -177,7 +153,6 @@ async def handler(ws):
     except Exception as e:
         logging.error(f"An unexpected error occurred with {client_info}: {e}", exc_info=True)
     finally:
-        # Cleanup on disconnect
         if client_info["room_id"]:
             if client_info["type"] == "controller":
                 await unregister_client(client_info["room_id"])
@@ -186,10 +161,10 @@ async def handler(ws):
 
 
 async def main():
-    logging.info("Starting WebSocket server on ws://localhost:5000")
-    async with websockets.serve(handler, "localhost", 5000):
+    port = int(os.environ.get("PORT", 10000))  # Render will set $PORT
+    logging.info(f"Starting WebSocket server on ws://0.0.0.0:{port}")
+    async with websockets.serve(handler, "0.0.0.0", port):
         await asyncio.Future()  # run forever
 
 if __name__ == "__main__":
     asyncio.run(main())
-

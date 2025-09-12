@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
-
 	"github.com/gorilla/websocket"
 )
 const(
@@ -33,14 +30,8 @@ func main(){
 	// fmt.Print("Provide dir path: ")
 	// fmt.Scan(&dir)
 	dir := "./test"
-	
-	f, err := os.Open(dir)
-	if err != nil {
-		log.Fatal("Error while opening file",err)
-	}
-	defer f.Close()
 
-	n, files, err :=  get_data(f)
+	n, files, err :=  get_data(dir)
 	if err != nil {
 		log.Fatal("Error while reading dir", err)
 	}
@@ -105,17 +96,10 @@ func main(){
 	}()
 
 	edge_connection.Wait()
-	for _ , file_entries := range files{
-		file_path := filepath.Join(dir ,file_entries.Name())
-		
-		file , err := os.Open(file_path)
-		if err != nil {
-			log.Printf("Error while reading file %s error %v\n", file_path, err)
-			continue
-		}
+	for _ , file_path := range files{
 		
 		worker := wp.pickWorker()
-		worker.req_chan <- Request{f: file}
+		worker.req_chan <- Request{f: file_path}
 	}
 
 	for i := 0; i < numWorkers; i++ {

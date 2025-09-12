@@ -3,19 +3,33 @@ package main
 import (
 	"bytes"
 	"io"
+	"io/fs"
 	"log"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
-func get_data(dir *os.File) (int, []os.DirEntry, error){
-	files , err :=	dir.ReadDir(-1)
+func get_data(root string) (int, [] string, error){
+	var files []string
+
+	err := filepath.WalkDir(root , func(path string, d fs.DirEntry, err error) error {
+		if err != nil{
+			return err
+		}
+
+		if !d.IsDir(){
+			files = append(files, path)
+		}
+		return nil
+	})
+	
 	if err != nil{
-		return 0, nil , err
+		log.Print("Error walking through directory ",err)
 	}
-	n := len(files)
-	return n, files, nil
+
+	return len(files), files, nil
 }
 
 func get_img_data(file_path string) ([]byte , error){

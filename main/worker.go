@@ -26,7 +26,7 @@ type Result struct{
 }
 
 type Request struct{
-	f *os.File
+	f string
 }
 
 type Worker struct{
@@ -56,11 +56,17 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup ){
 	dc.OnOpen(func() {
 		fmt.Println("Data channel Open")
 		for r := range w.req_chan {
+			
+			f, err := os.Open(r.f)
+			if err != nil{
+				log.Print("Error while opening file ",err)
+			}
 
-			file_name := strings.Split(r.f.Name(), "/")[1]
-			dc.SendText(file_name)
+			file_name := strings.Join(strings.Split(f.Name(), "/")[1:], "/")
+			send_file_name := strings.ReplaceAll(file_name, "/", "#")
+			dc.SendText(send_file_name)
 
-			img , err := get_img_data(r.f.Name()) 
+			img , err := get_img_data(f.Name()) 
 			if err != nil{
 				log.Fatal("Error while get image data", err)
 			}
@@ -73,8 +79,8 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup ){
 			dc.SendText(END)
 
 			w.res_chan <- Result{worker_id: w.worker_id, result: SUCCESS}
-			r.f.Close()
 			
+			f.Close()
 		}
 		
 	})
