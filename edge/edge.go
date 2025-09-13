@@ -193,7 +193,7 @@ func main() {
 		"edge_id": edge_id,
 	}
 
-	algo_service, _, err := websocket.DefaultDialer.Dial(ALGO_TEST_LINK, nil)
+	algo_service, _, err := websocket.DefaultDialer.Dial(ALGO_LIVE_LINK, nil)
 	if err != nil {
 		log.Fatal("Error while creating connection to algorithm service", err)
 	}

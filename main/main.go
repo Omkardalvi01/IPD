@@ -59,7 +59,7 @@ func main() {
 	room_id := create_uid()
 	fmt.Println("Connection_id:", room_id)
 
-	algo_service, _, err := websocket.DefaultDialer.Dial(ALGO_TEST_LINK, nil)
+	algo_service, _, err := websocket.DefaultDialer.Dial(ALGO_LIVE_LINK, nil)
 	if err != nil {
 		log.Fatal("Error while creating connection to algorithm service: ", err)
 	}
