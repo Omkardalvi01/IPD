@@ -1,3 +1,5 @@
 edge/*/
 main/*/
 algorithm/algo
+venv/
+edge/venv/
