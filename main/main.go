@@ -30,7 +30,7 @@ type aggregator struct{
 }
 
 var ( 
-ALGO_LIVE_LINK = "wss://ipd-allocator-yz2k.onrender.com"
+ALGO_LIVE_LINK = "wss://ipd-allocator-1.onrender.com/ws"
 ALGO_TEST_LINK = "ws://localhost:13000/join"
 )
 
@@ -117,7 +117,7 @@ func main() {
 	// Initialize worker pool
 	resultchan := make(chan Result, n)
 	wp := Workerpool{resultchan: resultchan}
-	wp.start_pool(numWorkers, edge_id, allocate.Uids, &edge_connection, &worker_done)
+	wp.start_pool(numWorkers, n, edge_id, allocate.Uids, &edge_connection, &worker_done)
 
 	// Start result processor
 	go func() {

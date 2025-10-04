@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"os"
@@ -38,7 +39,7 @@ type Worker struct{
 	weight int
 }
 
-func (w Worker) start(wg1, wg2 *sync.WaitGroup ){
+func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 	defer wg2.Done()
 
 	stop_worker := make(chan struct{})
@@ -55,6 +56,14 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup ){
 
 	dc.OnOpen(func() {
 		fmt.Println("Data channel Open")
+		
+		weight := (w.weight / 100) * total_files
+
+// Convert to bytes (big-endian uint32, safe for larger numbers)
+		buf := make([]byte, 4)
+		binary.BigEndian.PutUint32(buf, uint32(weight))
+		dc.Send(buf)
+		
 		for r := range w.req_chan {
 			
 			f, err := os.Open(r.f)
@@ -192,14 +201,14 @@ type Workerpool struct{
 	num_workers int
 }
 
-func (wp *Workerpool) start_pool(n int, id []string, weights map[string]int, edges , worker_done *sync.WaitGroup) {
+func (wp *Workerpool) start_pool(n, total_files int, id []string, weights map[string]int, edges , worker_done *sync.WaitGroup) {
 	wp.num_workers = n
 	for i := 0 ; i < n ; i++ {
 		w := Worker{worker_id: i, req_chan: make(chan Request), res_chan: wp.resultchan, conn_id: id[i], weight: weights[id[i]], current: 0}
 		wp.workers = append(wp.workers, &w)
 		edges.Add(1)
 		worker_done.Add(1)
-		go w.start(edges, worker_done)
+		go w.start(edges, worker_done, total_files)
 	}
 }
 

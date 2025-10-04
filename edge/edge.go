@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -38,6 +39,7 @@ const(
 	ML_MODEL = "ws://localhost:8765"
 )
 
+//sendfiletouser
 func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	log.Printf("Attempting to send file: %s", filePath)
 	
@@ -60,7 +62,9 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	log.Printf("Sending file metadata - Name: %s, Size: %d bytes", fileName, fileInfo.Size())
 	
 	// Send file marker and name - use the actual filename from Python output
-	err = dc.SendText("FILE:" + fileName)
+	//dont delete the sendfile variable
+	sendfilename := fmt.Sprintf("%s.txt",uid)
+	err = dc.SendText("FILE:" + sendfilename)
 	
 	if err != nil {
 		log.Printf("Failed to send file marker: %v", err)
@@ -93,7 +97,7 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	}
 
 	// Send end of file marker
-	err = dc.SendText("FILE_END:" + fileName)
+	err = dc.SendText("FILE_END:" + sendfilename)
 	if err != nil {
 		log.Printf("Failed to send file end marker: %v", err)
 		return fmt.Errorf("failed to send file end marker: %v", err)
@@ -275,8 +279,6 @@ func main() {
 						filesMutex.Unlock()
 					}
 				} else {
-					filesMutex.Lock()
-					totalFiles++
 					file_name = msgText
 					file_path := filepath.Join(dir_name, file_name)
 					log.Printf("Starting to receive file %d: %s", totalFiles, file_name)
@@ -284,16 +286,26 @@ func main() {
 					if err != nil {
 						log.Fatal("Error while creating file", err)
 					}
-					filesMutex.Unlock()
 				}
 
 			} else {
-				if f != nil {
-					_, err = io.Copy(f, bytes.NewBuffer(msg.Data))
-					if err != nil {
-						log.Fatal("Error while copying file", err)
+				// Check if this is a "weight"/"totalFiles" message
+				if len(msg.Data) == 4 {
+					// Decode integer
+					weight := int(binary.BigEndian.Uint32(msg.Data))
+					filesMutex.Lock()
+					totalFiles = weight
+					filesMutex.Unlock()
+					log.Printf("Updated totalFiles to %d", totalFiles)
+				}else{
+						if f != nil {
+						_, err = io.Copy(f, bytes.NewBuffer(msg.Data))
+						if err != nil {
+							log.Fatal("Error while copying file", err)
+						}
 					}
 				}
+				
 			}
 
 		})
