@@ -145,25 +145,61 @@ func main() {
 	// Wait for all workers to finish
 	worker_done.Wait()
 
-	// Prepare and send aggregation data
-	agg_file := aggregator{
-		NumEdges:     numWorkers,
-		UIDandPercent: allocate.Uids,
+	// Prepare and send aggregation data to the API server
+	// First, get the list of edge IDs that participated in this round
+	edgeIDs := make([]string, 0, len(allocate.Uids))
+	for id := range allocate.Uids {
+		edgeIDs = append(edgeIDs, id)
 	}
 
-	agg_req_body, err := json.Marshal(agg_file)
+	// Prepare the request payload with UIDs
+	requestData := map[string]interface{}{
+		"uids": edgeIDs,
+	}
+
+	// Convert to JSON
+	jsonData, err := json.Marshal(requestData)
 	if err != nil {
 		log.Fatal("Error while converting to JSON: ", err)
 	}
 
-	resp, err := http.Post("http://localhost:8000", "application/json", bytes.NewBuffer(agg_req_body))
+	// Make the HTTP POST request to the aggregator API
+	apiURL := "http://localhost:8000/receive_uids"
+	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Fatal("Error while posting to aggregator: ", err)
+		log.Fatal("Error while posting to aggregator API: ", err)
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	fmt.Printf("Response Status: %s\nResponse Body: %s\n", resp.Status, string(body))
+	// Read and parse the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal("Error reading response body: ", err)
+	}
+
+	// Parse the JSON response
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Fatal("Error parsing response: ", err)
+	}
+
+	// Log the response
+	fmt.Printf("\n=== Aggregation Results ===\n")
+	fmt.Printf("Status: %s\n", resp.Status)
+	fmt.Printf("Message: %v\n", result["message"])
+	
+	// If successful, show model location
+	if resp.StatusCode == http.StatusOK {
+		if modelPath, ok := result["model_path"].(string); ok {
+			fmt.Printf("Global model saved at: %s\n", modelPath)
+		}
+		if numClients, ok := result["num_clients"].(float64); ok {
+			fmt.Printf("Number of clients aggregated: %.0f\n", numClients)
+		}
+	} else {
+		// Show error details if the request failed
+		fmt.Printf("Error details: %v\n", result)
+	}
 
 	// Wait for interrupt signal
 	<-signalChan

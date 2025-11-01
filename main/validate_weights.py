@@ -81,44 +81,80 @@ def validate_edge_weights(edge_files: List[str]) -> Tuple[bool, Dict[str, Dict[s
         Tuple of (success: bool, weights: Dict[str, Dict[str, torch.Tensor]])
     """
     if not edge_files:
-        print("No edge files provided")
+        print("❌ Error: No edge files provided")
         return False, {}
 
     # Store weights from all files
     all_weights = {}
     reference_shapes = None
+    validation_errors = []
+
+    print(f"\n{'='*50}")
+    print(f"Validating {len(edge_files)} weight files...")
+    print(f"{'='*50}")
 
     for file_path in edge_files:
-        print(f"\nValidating {file_path}...")
+        file_name = os.path.basename(file_path)
+        print(f"\n🔍 Validating {file_name}...")
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            error_msg = f"❌ File not found: {file_path}"
+            print(error_msg)
+            validation_errors.append(error_msg)
+            continue
+            
+        # Check if file is empty
+        if os.path.getsize(file_path) == 0:
+            error_msg = f"❌ File is empty: {file_path}"
+            print(error_msg)
+            validation_errors.append(error_msg)
+            continue
+            
+        # Validate weight file
         success, weights = validate_weight_file(file_path)
         if not success:
-            return False, {}
+            error_msg = f"❌ Validation failed for {file_path}"
+            print(error_msg)
+            validation_errors.append(error_msg)
+            continue
 
         # Get client ID from filename
         client_id = os.path.basename(file_path).replace('.txt', '')
         all_weights[client_id] = weights
-
-        # Check parameter consistency
+        print(f"✅ Successfully validated {file_name}")
+        
+        # Check for consistent shapes across clients
         if reference_shapes is None:
-            # First file becomes reference
-            reference_shapes = {name: tensor.shape for name, tensor in weights.items()}
-            reference_layers = set(weights.keys())
+            reference_shapes = {k: v.shape for k, v in weights.items()}
+            print(f"\nReference shapes set from {file_name}:")
+            for k, v in reference_shapes.items():
+                print(f"  - {k}: {v}")
         else:
-            # Check against reference
-            current_layers = set(weights.keys())
-            if current_layers != reference_layers:
-                print(f"Error: Layer mismatch in {file_path}")
-                print(f"Expected layers: {reference_layers}")
-                print(f"Found layers: {current_layers}")
-                return False, {}
-
-            for name, tensor in weights.items():
-                if tensor.shape != reference_shapes[name]:
-                    print(f"Error: Shape mismatch in {file_path}, layer {name}")
-                    print(f"Expected shape: {reference_shapes[name]}")
-                    print(f"Found shape: {tensor.shape}")
-                    return False, {}
-
+            current_shapes = {k: v.shape for k, v in weights.items()}
+            if current_shapes != reference_shapes:
+                error_msg = f"❌ Shape mismatch in {file_name}:"
+                for k in reference_shapes:
+                    if k not in current_shapes:
+                        error_msg += f"\n     - Missing layer: {k}"
+                    elif current_shapes[k] != reference_shapes[k]:
+                        error_msg += f"\n     - {k}: expected {reference_shapes[k]}, got {current_shapes[k]}"
+                print(error_msg)
+                validation_errors.append(error_msg)
+                continue
+    
+    if validation_errors:
+        print(f"\n❌ Validation completed with {len(validation_errors)} error(s):")
+        for i, error in enumerate(validation_errors, 1):
+            print(f"{i}. {error}")
+        return False, {}
+    
+    if not all_weights:
+        print("❌ No valid weight files found")
+        return False, {}
+        
+    print(f"\n✅ Successfully validated {len(all_weights)} weight files")
+    
     print("\nAll edge weight files validated successfully!")
     print(f"Number of clients: {len(all_weights)}")
     print("Layer shapes:")

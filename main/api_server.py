@@ -29,7 +29,7 @@ app = Flask(__name__)
 
 # Directory configuration
 BASE_DIR = Path(__file__).parent
-OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR = BASE_DIR / "outputs"
 GLOBAL_WEIGHTS_DIR = BASE_DIR / "global_models"
 
 # Create directories if they don't exist
@@ -190,4 +190,4 @@ def get_latest_global_model():
         }), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=8000)

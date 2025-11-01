@@ -3,21 +3,29 @@ WebSocket-based Incremental training script for MobileNetV2 on edge devices.
 Receives image directory paths via WebSocket and performs incremental training.
 """
 
-import os
-import time
+import asyncio
 import json
 import logging
-import asyncio
-import websockets
+import os
+import sys
+import time
+import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Dict, Any, Optional
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision.transforms as transforms
+import websockets
 from torch.utils.data import DataLoader
+from torchvision.models import mobilenet_v2
 from tqdm import tqdm
 
-from model_utils import (
+# Add parent directory to path to allow imports from parent
+sys.path.append(str(Path(__file__).parent.parent))
+
+from edge.model_utils import (
     get_model, get_device, create_data_loaders, 
     save_model, load_model, validate_image_file
 )
@@ -40,7 +48,7 @@ class WebSocketTrainer:
     def __init__(self, model_save_path: str = "./saved_models/mobilenetv2_custom.pth",
                  batch_size: int = 32,
                  learning_rate: float = 0.001,
-                 num_epochs: int = 10):
+                 num_epochs: int = 1):
         """
         Initialize the WebSocket trainer.
         
@@ -346,31 +354,42 @@ async def handle_client(websocket, path=None):
         
         async for message in websocket:
             try:
-                # Expect plain text message containing directory path
-                data_dir = message.strip()
-                logger.info(f"Received directory path: {data_dir}")
+                # Parse the message as JSON containing both directory and edge_id
+                try:
+                    data = json.loads(message)
+                    data_dir = data.get('data_dir', '').strip()
+                    edge_id = data.get('edge_id', '').strip()
+                except json.JSONDecodeError:
+                    # Fallback: treat as plain text directory path
+                    data_dir = message.strip()
+                    edge_id = None
+                
+                logger.info(f"Received directory path: {data_dir}, edge_id: {edge_id}")
+                
+                # Set edge_id in environment if provided
+                if edge_id:
+                    os.environ['EDGE_ID'] = edge_id
+                elif not os.environ.get('EDGE_ID'):
+                    # If no edge_id provided and none in environment, generate one
+                    edge_id = str(uuid.uuid4())
+                    os.environ['EDGE_ID'] = edge_id
+                    logger.warning(f"No edge_id provided, generated new one: {edge_id}")
                 
                 if not data_dir:
                     error_msg = "ERROR: Empty directory path received"
                     logger.error(error_msg)
-                    await websocket.send(error_msg)
+                    await websocket.send(json.dumps({"error": error_msg, "success": False}))
                     continue
                 
                 # Perform training
                 logger.info(f"Starting training on directory: {data_dir}")
                 result = await trainer.train_on_images(data_dir)
                 
-                # Send response based on training result
-                if result["success"]:
-                    # Send back the output file path as plain text
-                    output_path = result["output_file_path"]
-                    logger.info(f"Training completed successfully. Sending output path: {output_path}")
-                    await websocket.send(output_path)
-                else:
-                    # Send error message as plain text
-                    error_msg = f"ERROR: {result['error']}"
-                    logger.error(error_msg)
-                    await websocket.send(error_msg)
+                # Add edge_id to the result
+                result["edge_id"] = os.environ.get('EDGE_ID')
+                
+                # Send response as JSON
+                await websocket.send(json.dumps(result))
                     
             except Exception as e:
                 error_msg = f"ERROR: Internal error - {str(e)}"

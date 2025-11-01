@@ -1,5 +1,7 @@
 edge/*/
 main/__pycache__/
+main/outputs/
+main/global_models/
 algorithm/algo
 venv/
 edge/venv/

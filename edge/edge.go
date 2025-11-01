@@ -3,12 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -123,8 +123,20 @@ func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
 	}
 	defer model.Close()
 
-	log.Printf("Sending directory path to ML service: %s", absPath)
-	err = model.WriteMessage(websocket.TextMessage, []byte(absPath))
+	// Create JSON message with directory and edge ID
+	message := map[string]string{
+		"data_dir": absPath,
+		"edge_id":  edgeID,
+	}
+	
+	jsonMessage, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Error creating JSON message: %v", err)
+		return fmt.Errorf("failed to create JSON message: %v", err)
+	}
+	
+	log.Printf("Sending directory path and edge ID to ML service: %s", string(jsonMessage))
+	err = model.WriteMessage(websocket.TextMessage, jsonMessage)
 	if err != nil {
 		log.Printf("Error while writing to ML service connection: %v", err)
 		return fmt.Errorf("failed to send data to ML service: %v", err)
@@ -137,13 +149,31 @@ func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
 		return fmt.Errorf("failed to read response from ML service: %v", err)
 	}
 	
-	outputPath := strings.TrimSpace(string(resp))
-	log.Printf("Received response from ML service: %s", outputPath)
+	// Parse the JSON response
+	var result map[string]interface{}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		log.Printf("Error parsing JSON response: %v", err)
+		return fmt.Errorf("invalid response format from ML service: %v", err)
+	}
 	
-	// Check if the response is an error message
-	if strings.HasPrefix(outputPath, "ERROR:") {
-		log.Printf("ML service returned error: %s", outputPath)
-		return fmt.Errorf("ML service error: %s", outputPath)
+	log.Printf("Received response from ML service: %+v", result)
+	
+	// Check if the response indicates an error
+	if success, ok := result["success"].(bool); ok && !success {
+		errMsg := "unknown error occurred"
+		if msg, ok := result["error"].(string); ok {
+			errMsg = msg
+		}
+		log.Printf("ML service returned error: %s", errMsg)
+		return fmt.Errorf("ML service error: %s", errMsg)
+	}
+	
+	// Get the output file path
+	outputPath, ok := result["output_file_path"].(string)
+	if !ok || outputPath == "" {
+		errMsg := "no output file path in response"
+		log.Print(errMsg)
+		return fmt.Errorf("ML service error: %s", errMsg)
 	}
 	
 	// Verify that the output file exists
