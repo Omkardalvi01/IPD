@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -370,6 +371,10 @@ func main() {
 
 	finalAnswer := pc.LocalDescription()
 
+	ld := pc.LocalDescription()
+	ld.SDP = strings.ReplaceAll(ld.SDP, "a=max-message-size:65536", "a=max-message-size:262144")
+	_ = pc.SetLocalDescription(*ld)
+	
 	fmt.Print(finalAnswer.SDP)
 	err = networking.Forward(conn, finalAnswer.SDP)
 	if err != nil {

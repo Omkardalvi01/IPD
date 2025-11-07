@@ -3,6 +3,7 @@ package networking
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/pion/webrtc/v3"
 )
@@ -65,6 +66,10 @@ func Peerconnection(uid	string) (*webrtc.PeerConnection, *webrtc.DataChannel, er
 	}
 
 	<-webrtc.GatheringCompletePromise(peer_conn)
+
+	ld := peer_conn.LocalDescription()
+	ld.SDP = strings.ReplaceAll(ld.SDP, "a=max-message-size:65536", "a=max-message-size:262144")
+	_ = peer_conn.SetLocalDescription(*ld)
 
 	err = Forward(conn, peer_conn.LocalDescription().SDP)
 	if err != nil{

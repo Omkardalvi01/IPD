@@ -48,7 +48,7 @@ class WebSocketTrainer:
     def __init__(self, model_save_path: str = "./saved_models/mobilenetv2_custom.pth",
                  batch_size: int = 32,
                  learning_rate: float = 0.001,
-                 num_epochs: int = 1):
+                 num_epochs: int = 5):
         """
         Initialize the WebSocket trainer.
         
