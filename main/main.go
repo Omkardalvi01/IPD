@@ -30,8 +30,8 @@ type aggregator struct{
 }
 
 var ( 
-ALGO_LIVE_LINK = "wss://ipd-allocator-1.onrender.com/ws"
-ALGO_TEST_LINK = "ws://localhost:13000/join"
+ALGO_LIVE_LINK = "ws://localhost:13000/join"
+ALGO_TEST_LINK = "wss://ipd-allocator-1.onrender.com/ws"
 )
 
 func main() {
@@ -103,6 +103,16 @@ func main() {
 		log.Fatal("Error while reading from connection: ", err)
 	}
 	fmt.Println("Response from algo service: ", allocate)
+
+	// Keep reading from algo_service to handle pings/pongs
+	go func() {
+		for {
+			if _, _, err := algo_service.NextReader(); err != nil {
+				log.Printf("Algo service read error: %v", err)
+				return
+			}
+		}
+	}()
 
 	// Process allocation
 	edge_id := make([]string, 0, len(allocate.Uids))

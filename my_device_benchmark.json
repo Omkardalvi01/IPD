@@ -1,0 +1,27 @@
+{
+  "benchmark_score": 100.0,
+  "device_info": {
+    "platform": "Linux",
+    "processor": "x86_64",
+    "python_version": "3.12.3",
+    "device_type": "CPU",
+    "cpu_count": 12,
+    "cpu_count_logical": 16,
+    "ram_total_gb": 15.335014343261719,
+    "ram_available_gb": 9.262226104736328
+  },
+  "raw_metrics": {
+    "computation_ops_per_sec": 91.38,
+    "inference_images_per_sec": 32.25,
+    "memory_available_gb": 8.8,
+    "network_speed_mbps": 3320.05
+  },
+  "component_scores": {
+    "computation": 100,
+    "inference": 100,
+    "memory": 100,
+    "network": 100
+  },
+  "device_multiplier": 1.0,
+  "timestamp": 1763565915.775255
+}

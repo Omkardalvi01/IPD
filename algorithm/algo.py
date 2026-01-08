@@ -60,19 +60,37 @@ async def check_and_notify_controller(room_id):
     if num_edges_connected == num_edges_expected:
         logging.info(f"Room '{room_id}' is full. Sending allocation to controller.")
         
-        # Calculate a simple percentage-based allocation.
-        # Ensure at least 1% for each, distribute remainder.
-        percentage = 100 // num_edges_expected
-        remainder = 100 % num_edges_expected
+        # Calculate weighted allocation based on benchmark scores
+        total_score = sum(edge_data['score'] for edge_data in room["connected_edges"].values())
         
         allocation_data = {}
-        edge_ids = list(room["connected_edges"].keys())
-
-        for i, edge_id in enumerate(edge_ids):
-            alloc = percentage
-            if i < remainder:
-                alloc += 1
-            allocation_data[edge_id] = alloc
+        
+        if total_score > 0:
+            # Weighted distribution
+            remaining_percentage = 100
+            edge_ids = list(room["connected_edges"].keys())
+            
+            for i, edge_id in enumerate(edge_ids):
+                if i == len(edge_ids) - 1:
+                    # Last edge gets the remainder to ensure sum is 100
+                    allocation_data[edge_id] = remaining_percentage
+                else:
+                    score = room["connected_edges"][edge_id]['score']
+                    alloc = int((score / total_score) * 100)
+                    allocation_data[edge_id] = alloc
+                    remaining_percentage -= alloc
+        else:
+            # Fallback to equal distribution if scores are invalid
+            logging.warning(f"Total score is 0 for room '{room_id}'. Falling back to equal distribution.")
+            percentage = 100 // num_edges_expected
+            remainder = 100 % num_edges_expected
+            
+            edge_ids = list(room["connected_edges"].keys())
+            for i, edge_id in enumerate(edge_ids):
+                alloc = percentage
+                if i < remainder:
+                    alloc += 1
+                allocation_data[edge_id] = alloc
 
         payload = {
             "allocation": allocation_data
@@ -129,6 +147,8 @@ async def handler(ws):
         elif role == "E":
             client_info["type"] = "edge"
             edge_id = data.get("edge_id")
+            benchmark_score = float(data.get("benchmark_score", 1.0))
+            
             if not edge_id:
                 await ws.close(1008, "edge_id is required for role 'E'.")
                 return
@@ -152,7 +172,11 @@ async def handler(ws):
                     await ws.close()
                     return
                 
-                room["connected_edges"][edge_id] = ws
+                # Store socket and score
+                room["connected_edges"][edge_id] = {
+                    "ws": ws,
+                    "score": benchmark_score
+                }
                 await ws.send(json.dumps({"status": "successfully joined room"}))
             
             # Check if the room is now full and notify the controller

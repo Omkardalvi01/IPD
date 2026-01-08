@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,8 +37,8 @@ func id_maker() string {
 }
 
 const(
-	ALGO_LIVE_LINK = "wss://ipd-allocator-1.onrender.com/ws"
- 	ALGO_TEST_LINK = "ws://localhost:13000/join"
+	ALGO_LIVE_LINK = "ws://localhost:13000/join"
+ 	ALGO_TEST_LINK = "wss://ipd-allocator-1.onrender.com/ws"
 	ML_MODEL = "ws://localhost:8765"
 )
 
@@ -222,10 +224,61 @@ func main() {
 	fmt.Print("Give the room_id: ")
 	fmt.Scan(&room_id)
 
-	postBody := map[string]string{
+	// Run benchmark script to get score
+	fmt.Println("Running benchmark...")
+	
+	// Check where benchmark.py is
+	benchPath := "benchmark.py"
+	if _, err := os.Stat(benchPath); os.IsNotExist(err) {
+		// Try parent directory
+		benchPath = "../benchmark.py"
+	}
+
+	// Detect Python executable
+	pythonExec := "python3"
+	possibleVenvs := []string{
+		"venv/bin/python3",
+		"../venv/bin/python3",
+		"edge/venv/bin/python3",
+		"../edge/venv/bin/python3",
+	}
+
+	for _, venvPath := range possibleVenvs {
+		if _, err := os.Stat(venvPath); err == nil {
+			pythonExec = venvPath
+			fmt.Printf("Using venv python: %s\n", pythonExec)
+			break
+		}
+	}
+	
+	cmd := exec.Command(pythonExec, benchPath, "--score-only")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	// Capture stderr to debug if needed
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	
+	err = cmd.Run()
+	if err != nil {
+		log.Printf("Error running benchmark: %v", err)
+		log.Printf("Stderr: %s", stderr.String())
+		// Fallback score if benchmark fails
+		out.WriteString("1.0")
+	}
+	
+	scoreStr := strings.TrimSpace(out.String())
+	score, err := strconv.ParseFloat(scoreStr, 64)
+	if err != nil {
+		log.Printf("Error parsing score: %v", err)
+		score = 1.0
+	}
+	fmt.Printf("Benchmark Score: %.2f\n", score)
+
+	postBody := map[string]interface{}{
 		"role":    Role,
 		"room_id": room_id,
 		"edge_id": edge_id,
+		"benchmark_score": score,
 	}
 
 	algo_service, _, err := websocket.DefaultDialer.Dial(ALGO_LIVE_LINK, nil)
@@ -238,16 +291,24 @@ func main() {
 		log.Fatal("Error while writing to connection", err)
 	}
 
-	_, resp, err := algo_service.ReadMessage()
-	if err != nil {
-		log.Println("Error while reading from connection ", err)
-	}
-	fmt.Println("Response from algo service ", string(resp))
+	// Keep the algorithm service connection alive in a goroutine
+	go func() {
+		defer algo_service.Close()
+		for {
+			_, _, err := algo_service.ReadMessage()
+			if err != nil {
+				log.Printf("Algorithm service connection closed: %v", err)
+				return
+			}
+		}
+	}()
 
 	conn, err := networking.Createconnection()
 	if err != nil {
+		log.Printf("Error creating networking connection: %v", err)
 		return
 	}
+	defer conn.Close()
 
 	err = networking.Forward(conn, Role)
 	if err != nil {
