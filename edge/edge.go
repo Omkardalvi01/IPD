@@ -8,8 +8,8 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,16 +36,16 @@ func id_maker() string {
 	return u.String()
 }
 
-const(
-	ALGO_LIVE_LINK = "ws://localhost:13000/join"
- 	ALGO_TEST_LINK = "wss://ipd-allocator-1.onrender.com/ws"
-	ML_MODEL = "ws://localhost:8765"
+const (
+	ALGO_TEST_LINK	 = "ws://localhost:13000/join"
+	ALGO_LIVE_LINK = "wss://ipd-allocator-1.onrender.com/ws"
+	ML_MODEL       = "ws://localhost:8765"
 )
 
-//sendfiletouser
+// sendfiletouser
 func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	log.Printf("Attempting to send file: %s", filePath)
-	
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Printf("Failed to open file %s: %v", filePath, err)
@@ -63,12 +63,12 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	// Send the filename first
 	fileName := filepath.Base(filePath)
 	log.Printf("Sending file metadata - Name: %s, Size: %d bytes", fileName, fileInfo.Size())
-	
+
 	// Send file marker and name - use the actual filename from Python output
 	//dont delete the sendfile variable
-	sendfilename := fmt.Sprintf("%s.txt",uid)
+	sendfilename := fmt.Sprintf("%s.txt", uid)
 	err = dc.SendText("FILE:" + sendfilename)
-	
+
 	if err != nil {
 		log.Printf("Failed to send file marker: %v", err)
 		return fmt.Errorf("failed to send file marker: %v", err)
@@ -110,14 +110,14 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	return nil
 }
 
-func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
+func triggerPythonScript(dirName, edgeID string, percentage int, dc *webrtc.DataChannel) error {
 	// Convert relative directory name to absolute path
 	absPath, err := filepath.Abs(dirName)
 	if err != nil {
 		log.Printf("Error getting absolute path for %s: %v", dirName, err)
 		return fmt.Errorf("error getting absolute path: %v", err)
 	}
-	
+
 	log.Printf("Connecting to ML model service at %s", ML_MODEL)
 	model, _, err := websocket.DefaultDialer.Dial(ML_MODEL, nil)
 	if err != nil {
@@ -126,18 +126,19 @@ func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
 	}
 	defer model.Close()
 
-	// Create JSON message with directory and edge ID
-	message := map[string]string{
-		"data_dir": absPath,
-		"edge_id":  edgeID,
+	// Create JSON message with directory, edge ID, and percentage
+	message := map[string]interface{}{
+		"data_dir":   absPath,
+		"edge_id":    edgeID,
+		"percentage": percentage,
 	}
-	
+
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
 		log.Printf("Error creating JSON message: %v", err)
 		return fmt.Errorf("failed to create JSON message: %v", err)
 	}
-	
+
 	log.Printf("Sending directory path and edge ID to ML service: %s", string(jsonMessage))
 	err = model.WriteMessage(websocket.TextMessage, jsonMessage)
 	if err != nil {
@@ -151,16 +152,16 @@ func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
 		log.Printf("Error while reading from ML service connection: %v", err)
 		return fmt.Errorf("failed to read response from ML service: %v", err)
 	}
-	
+
 	// Parse the JSON response
 	var result map[string]interface{}
 	if err := json.Unmarshal(resp, &result); err != nil {
 		log.Printf("Error parsing JSON response: %v", err)
 		return fmt.Errorf("invalid response format from ML service: %v", err)
 	}
-	
+
 	log.Printf("Received response from ML service: %+v", result)
-	
+
 	// Check if the response indicates an error
 	if success, ok := result["success"].(bool); ok && !success {
 		errMsg := "unknown error occurred"
@@ -170,7 +171,7 @@ func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
 		log.Printf("ML service returned error: %s", errMsg)
 		return fmt.Errorf("ML service error: %s", errMsg)
 	}
-	
+
 	// Get the output file path
 	outputPath, ok := result["output_file_path"].(string)
 	if !ok || outputPath == "" {
@@ -178,15 +179,15 @@ func triggerPythonScript(dirName, edgeID string, dc *webrtc.DataChannel) error {
 		log.Print(errMsg)
 		return fmt.Errorf("ML service error: %s", errMsg)
 	}
-	
+
 	// Verify that the output file exists
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
 		log.Printf("Output file does not exist: %s", outputPath)
 		return fmt.Errorf("output file does not exist: %s", outputPath)
 	}
-	
+
 	log.Printf("ML training completed successfully. Output file: %s", outputPath)
-	
+
 	// Send the output file back to the server
 	if dc != nil && dc.ReadyState() == webrtc.DataChannelStateOpen {
 		log.Printf("Sending output file to server via DataChannel...")
@@ -216,7 +217,7 @@ func main() {
 
 	edge_id := id_maker()
 	fmt.Printf("Edge id %s\n", edge_id)
-	
+
 	// Set environment variable for Python script
 	os.Setenv("EDGE_ID", edge_id)
 
@@ -226,7 +227,7 @@ func main() {
 
 	// Run benchmark script to get score
 	fmt.Println("Running benchmark...")
-	
+
 	// Check where benchmark.py is
 	benchPath := "benchmark.py"
 	if _, err := os.Stat(benchPath); os.IsNotExist(err) {
@@ -250,14 +251,14 @@ func main() {
 			break
 		}
 	}
-	
+
 	cmd := exec.Command(pythonExec, benchPath, "--score-only")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	// Capture stderr to debug if needed
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	
+
 	err = cmd.Run()
 	if err != nil {
 		log.Printf("Error running benchmark: %v", err)
@@ -265,7 +266,7 @@ func main() {
 		// Fallback score if benchmark fails
 		out.WriteString("1.0")
 	}
-	
+
 	scoreStr := strings.TrimSpace(out.String())
 	score, err := strconv.ParseFloat(scoreStr, 64)
 	if err != nil {
@@ -275,9 +276,9 @@ func main() {
 	fmt.Printf("Benchmark Score: %.2f\n", score)
 
 	postBody := map[string]interface{}{
-		"role":    Role,
-		"room_id": room_id,
-		"edge_id": edge_id,
+		"role":            Role,
+		"room_id":         room_id,
+		"edge_id":         edge_id,
 		"benchmark_score": score,
 	}
 
@@ -328,7 +329,8 @@ func main() {
 	var (
 		totalFiles    int
 		receivedFiles int
-		filesMutex   sync.Mutex
+		allocatedPercentage int
+		filesMutex    sync.Mutex
 	)
 
 	var file_name string
@@ -354,21 +356,28 @@ func main() {
 				if msgText == END {
 					filesMutex.Lock()
 					receivedFiles++
-					log.Printf("Received file %d of %d", receivedFiles, totalFiles)
-					
-					// Check if all files have been received
-					if receivedFiles == totalFiles {
-						filesMutex.Unlock()
-						// All files received, trigger Python script
-						log.Printf("All %d files received. Triggering ML training...", totalFiles)
-						go func() {
-							err := triggerPythonScript(dir_name, edge_id, dc)
-							if err != nil {
-								log.Printf("Error triggering Python script: %v", err)
-							}
-						}()
+					currentCount := receivedFiles // Copy for logging without holding lock
+					filesMutex.Unlock()
+					log.Printf("Received file %d of %d", currentCount, totalFiles)
+				} else if msgText == "BATCH_ENDED" {
+					log.Printf("Received BATCH_ENDED signal. All files received. Triggering ML training...")
+					go func() {
+						err := triggerPythonScript(dir_name, edge_id, allocatedPercentage, dc)
+						if err != nil {
+							log.Printf("Error triggering Python script: %v", err)
+						}
+					}()
+				} else if strings.HasPrefix(msgText, "WEIGHT_PERCENTAGE:") {
+					// Parse allocation percentage
+					percStr := strings.TrimPrefix(msgText, "WEIGHT_PERCENTAGE:")
+					perc, err := strconv.Atoi(percStr)
+					if err != nil {
+						log.Printf("Error parsing weight percentage: %v", err)
 					} else {
+						filesMutex.Lock()
+						allocatedPercentage = perc
 						filesMutex.Unlock()
+						log.Printf("Received allocation percentage: %d%%", perc)
 					}
 				} else {
 					file_name = msgText
@@ -389,15 +398,15 @@ func main() {
 					totalFiles = weight
 					filesMutex.Unlock()
 					log.Printf("Updated totalFiles to %d", totalFiles)
-				}else{
-						if f != nil {
+				} else {
+					if f != nil {
 						_, err = io.Copy(f, bytes.NewBuffer(msg.Data))
 						if err != nil {
 							log.Fatal("Error while copying file", err)
 						}
 					}
 				}
-				
+
 			}
 
 		})
@@ -409,7 +418,7 @@ func main() {
 	}
 
 	offer_SDP := webrtc.SessionDescription{
-		SDP: offer,
+		SDP:  offer,
 		Type: webrtc.SDPTypeOffer,
 	}
 
@@ -435,7 +444,7 @@ func main() {
 	ld := pc.LocalDescription()
 	ld.SDP = strings.ReplaceAll(ld.SDP, "a=max-message-size:65536", "a=max-message-size:262144")
 	_ = pc.SetLocalDescription(*ld)
-	
+
 	fmt.Print(finalAnswer.SDP)
 	err = networking.Forward(conn, finalAnswer.SDP)
 	if err != nil {

@@ -1,0 +1,3 @@
+i also want you to understand the evaluate.py properly and make it robust and accurate for testing and it should make detailed log of results a inclunding the number of clients date  time taken and other important aspects as well 
+
+also add needed graphs as well to better understand 

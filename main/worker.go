@@ -15,15 +15,15 @@ import (
 
 type result_state int
 
-const(
+const (
 	SUCCESS result_state = 0
-	FAILURE result_state = -1 
+	FAILURE result_state = -1
 	END string = "EOF"
 )
 
 type Result struct{
 	worker_id int
-	result result_state
+	result    result_state
 }
 
 type Request struct{
@@ -47,7 +47,7 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 	peer ,dc , err := networking.Peerconnection(w.conn_id)
 	if err != nil{
 		log.Printf("Error with peer connection in worker %d", w.worker_id)
-		return 
+		return
 	}
 	defer dc.Close()
 	defer peer.Close()
@@ -56,16 +56,20 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 
 	dc.OnOpen(func() {
 		fmt.Println("Data channel Open")
-		
-		weight := (w.weight / 100) * total_files
 
-// Convert to bytes (big-endian uint32, safe for larger numbers)
+		weight := (w.weight * total_files) / 100
+
+		// Convert to bytes (big-endian uint32, safe for larger numbers)
 		buf := make([]byte, 4)
 		binary.BigEndian.PutUint32(buf, uint32(weight))
 		dc.Send(buf)
-		
+
+		// Send allocation percentage explicitly
+		perc_msg := fmt.Sprintf("WEIGHT_PERCENTAGE:%d", w.weight)
+		dc.SendText(perc_msg)
+
 		for r := range w.req_chan {
-			
+
 			f, err := os.Open(r.f)
 			if err != nil{
 				log.Print("Error while opening file ",err)
@@ -75,23 +79,24 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 			send_file_name := strings.ReplaceAll(file_name, "/", "#")
 			dc.SendText(send_file_name)
 
-			img , err := get_img_data(f.Name()) 
-			if err != nil{
+			img, err := get_img_data(f.Name())
+			if err != nil {
 				log.Fatal("Error while get image data", err)
 			}
 
 			err = dc.Send(img)
-			if err != nil{
+			if err != nil {
 				log.Fatal("Error while sending image data", err)
 			}
-			
+
 			dc.SendText(END)
 
 			w.res_chan <- Result{worker_id: w.worker_id, result: SUCCESS}
-			
+
 			f.Close()
 		}
-		
+		// Signal that all files for this batch have been sent
+		dc.SendText("BATCH_ENDED")
 	})
 	// Create output directory if it doesn't exist
 	outputDir := "./outputs"
@@ -125,11 +130,9 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 
 				currentFileName = strings.TrimPrefix(msgText, "FILE:")
 				filePath := filepath.Join(outputDir, currentFileName)
-				
-				
-				
+
 				log.Printf("Starting to receive file: %s", currentFileName)
-				
+
 				var err error
 				currentFile, err = os.Create(filePath)
 				if err != nil {
@@ -159,7 +162,6 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 					log.Printf("Received FILE_END but no file is currently being received")
 				}
 
-				
 			default:
 				log.Printf("Received message: %s", msgText)
 			}
@@ -195,15 +197,15 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 	<-stop_worker
 }
 
-type Workerpool struct{
-	resultchan chan<- Result
-	workers []*Worker
+type Workerpool struct {
+	resultchan  chan<- Result
+	workers     []*Worker
 	num_workers int
 }
 
-func (wp *Workerpool) start_pool(n, total_files int, id []string, weights map[string]int, edges , worker_done *sync.WaitGroup) {
+func (wp *Workerpool) start_pool(n, total_files int, id []string, weights map[string]int, edges, worker_done *sync.WaitGroup) {
 	wp.num_workers = n
-	for i := 0 ; i < n ; i++ {
+	for i := 0; i < n; i++ {
 		w := Worker{worker_id: i, req_chan: make(chan Request), res_chan: wp.resultchan, conn_id: id[i], weight: weights[id[i]], current: 0}
 		wp.workers = append(wp.workers, &w)
 		edges.Add(1)
@@ -212,14 +214,14 @@ func (wp *Workerpool) start_pool(n, total_files int, id []string, weights map[st
 	}
 }
 
-func (wp *Workerpool) pickWorker() *Worker{
+func (wp *Workerpool) pickWorker() *Worker {
 	var best *Worker
 	total := 0
 
-	for _, w := range wp.workers{
+	for _, w := range wp.workers {
 		w.current += w.weight
 		total += w.weight
-		if best == nil || w.current > best.current{
+		if best == nil || w.current > best.current {
 			best = w
 		}
 	}

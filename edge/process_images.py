@@ -226,7 +226,12 @@ class WebSocketTrainer:
                         epoch_loss += loss.item()
                         epoch_batches += 1
                         total_loss += loss.item()
+                        total_loss += loss.item()
                         num_batches += 1
+                        
+                        # Yield control to event loop to keep WebSocket connection alive
+                        if batch_idx % 5 == 0:
+                            await asyncio.sleep(0)
                         
                         if batch_idx % 10 == 0:  # Log every 10 batches
                             logger.info(f"Epoch {epoch + 1}, Batch {batch_idx}: Loss = {loss.item():.4f}")
@@ -300,6 +305,11 @@ class WebSocketTrainer:
             output_path = root_dir / f"{edge_id}.txt"
             
             with open(output_path, 'w') as f:
+                # Write Weight Percentage Header if available
+                percentage = os.environ.get('ALLOCATED_PERCENTAGE')
+                if percentage:
+                    f.write(f"# WEIGHT_PERCENTAGE: {percentage}\n")
+                
                 # Iterate through all parameters in the model
                 for name, param in self.model.state_dict().items():
                     # Skip num_batches_tracked in BatchNorm layers
@@ -374,6 +384,12 @@ async def handle_client(websocket, path=None):
                     edge_id = str(uuid.uuid4())
                     os.environ['EDGE_ID'] = edge_id
                     logger.warning(f"No edge_id provided, generated new one: {edge_id}")
+
+                # Handle percentage
+                percentage = data.get('percentage')
+                if percentage is not None:
+                    os.environ['ALLOCATED_PERCENTAGE'] = str(percentage)
+                    logger.info(f"Set allocated percentage: {percentage}%")
                 
                 if not data_dir:
                     error_msg = "ERROR: Empty directory path received"
@@ -425,7 +441,8 @@ async def main():
     
     # Start the WebSocket server with proper exception handling
     try:
-        async with websockets.serve(handle_client, args.host, args.port):
+        # Increase timeouts to handle long training times (default is usually ~20s)
+        async with websockets.serve(handle_client, args.host, args.port, ping_interval=60, ping_timeout=60):
             logger.info("WebSocket server started. Waiting for connections...")
             logger.info("Press Ctrl+C to stop the server")
             

@@ -21,8 +21,8 @@ def validate_weight_file(file_path) -> Tuple[bool, Dict[str, torch.Tensor]]:
         # value1 value2 value3 ...
         i = 0
         while i < len(lines):
-            # Skip empty lines
-            if not lines[i].strip():
+            # Skip empty lines or comments
+            if not lines[i].strip() or lines[i].strip().startswith('#'):
                 i += 1
                 continue
                 
@@ -60,7 +60,7 @@ def validate_weight_file(file_path) -> Tuple[bool, Dict[str, torch.Tensor]]:
             try:
                 tensor = torch.tensor(weights, dtype=torch.float32)
                 tensors[name] = tensor
-                print(f"✓ {name}: shape {tensor.shape}, dtype {tensor.dtype}")
+                # print(f"✓ {name}: shape {tensor.shape}, dtype {tensor.dtype}")  # Logging suppressed
             except Exception as e:
                 print(f"✗ Error in parameter {name}: {str(e)}")
                 raise
@@ -89,13 +89,13 @@ def validate_edge_weights(edge_files: List[str]) -> Tuple[bool, Dict[str, Dict[s
     reference_shapes = None
     validation_errors = []
 
-    print(f"\n{'='*50}")
-    print(f"Validating {len(edge_files)} weight files...")
-    print(f"{'='*50}")
+    # print(f"\n{'='*50}")
+    # print(f"Validating {len(edge_files)} weight files...")
+    # print(f"{'='*50}")
 
     for file_path in edge_files:
         file_name = os.path.basename(file_path)
-        print(f"\n🔍 Validating {file_name}...")
+        # print(f"\n🔍 Validating {file_name}...")
         
         # Check if file exists
         if not os.path.exists(file_path):

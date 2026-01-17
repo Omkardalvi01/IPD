@@ -76,13 +76,33 @@ def receive_uids():
         weight_files = [os.path.join(OUTPUT_DIR, f"{uid}.txt") for uid in uids]
         
         # Validate all weight files
-        print("Validating edge weight files...")
+        # print("Validating edge weight files...") # logging suppressed
         success, client_weights = validate_edge_weights(weight_files)
         if not success:
             return jsonify({"error": "Weight validation failed"}), 400
 
+        # Augment client_weights with 'factor' (percentage) from the files
+        # validate_edge_weights only returns tensors, we need to re-read headers
+        augmented_weights = {}
+        for uid in uids:
+            if uid in client_weights:
+                weight_file = os.path.join(OUTPUT_DIR, f"{uid}.txt")
+                percentage = 1.0
+                try:
+                    with open(weight_file, 'r') as f:
+                        first_line = f.readline()
+                        if first_line.startswith("# WEIGHT_PERCENTAGE:"):
+                            percentage = float(first_line.split(":")[1].strip())
+                except:
+                    pass # Keep default
+                
+                augmented_weights[uid] = {
+                    'weights': client_weights[uid],
+                    'factor': percentage
+                }
+
         # Perform aggregation
-        global_weights = fedavg_aggregate(client_weights)
+        global_weights = fedavg_aggregate(augmented_weights)
 
         # Create timestamped directory for this aggregation
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

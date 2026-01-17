@@ -31,9 +31,24 @@ def load_client_payloads(client_payloads_dir: str) -> Dict[str, Dict[str, Any]]:
     for txt_file in txt_files:
         file_path = os.path.join(client_payloads_dir, txt_file)
         try:
+            percentage = 1.0 # Default weight if not specified
+            content = ""
+            
             with open(file_path, 'r') as f:
-                # Assume the txt file contains a JSON-like dictionary as text
-                data = json.loads(f.read())
+                first_line = f.readline()
+                if first_line.startswith("# WEIGHT_PERCENTAGE:"):
+                    try:
+                        percentage = float(first_line.split(":")[1].strip())
+                        print(f"found percentage: {percentage} for client: {txt_file}")
+                    except ValueError:
+                        print(f"Error parsing percentage in {txt_file}, using default")
+                    content = f.read() # Read the rest
+                else:
+                    content = first_line + f.read() # Read all
+            
+            # Assume the txt file contains a JSON-like dictionary as text
+            data = json.loads(content)
+            
             # Extract client ID from filename
             client_id = txt_file.replace('.txt', '').replace('edge_', '').replace('client_', '')
             # Skip metadata or chunk files
@@ -47,24 +62,43 @@ def load_client_payloads(client_payloads_dir: str) -> Dict[str, Dict[str, Any]]:
             weights = {}
             for layer_name, layer_weights in data.items():
                 weights[layer_name] = torch.tensor(layer_weights, dtype=torch.float32)
-            client_weights[client_id] = weights
-            print(f"Loaded weights for client {client_id}: {len(weights)} layers")
+            
+            client_weights[client_id] = {
+                'weights': weights,
+                'factor': percentage
+            }
+            print(f"Loaded weights for client {client_id}: {len(weights)} layers (Weight Factor: {percentage})")
         except Exception as e:
             print(f"Error loading {txt_file}: {e}")
             continue
     return client_weights
 
-def fedavg_aggregate(client_weights: Dict[str, Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+def fedavg_aggregate(client_weights: Dict[str, Dict[str, Any]]) -> Dict[str, torch.Tensor]:
     """Perform Federated Averaging aggregation"""
     
     if not client_weights:
         raise ValueError("No client weights provided")
     
     client_ids = list(client_weights.keys())
-    first_client_weights = client_weights[client_ids[0]]
+    first_client_entry = client_weights[client_ids[0]]
+    if 'weights' in first_client_entry:
+        first_client_weights = first_client_entry['weights']
+    else:
+        # Fallback for legacy format or validation
+        first_client_weights = first_client_entry
     
     print(f"Aggregating weights from {len(client_ids)} clients: {client_ids}")
     
+    # Calculate total weight factor for normalization
+    total_weight_factor = sum(client_weights[cid]['factor'] for cid in client_ids)
+    if total_weight_factor == 0:
+        print("Warning: Total weight factor is 0, falling back to equal weighting")
+        total_weight_factor = len(client_ids)
+        for cid in client_ids:
+            client_weights[cid]['factor'] = 1.0
+            
+    print(f"Total weight factor (normalization constant): {total_weight_factor}")
+
     # Initialize global parameters with zeros
     global_weights = {}
     for param_name, param_tensor in first_client_weights.items():
@@ -72,21 +106,21 @@ def fedavg_aggregate(client_weights: Dict[str, Dict[str, torch.Tensor]]) -> Dict
     
     # Aggregate parameters across all clients
     for client_id in client_ids:
-        client_weight_dict = client_weights[client_id]
+        client_entry = client_weights[client_id]
+        client_weight_dict = client_entry['weights']
+        client_factor = client_entry['factor']
+        
+        # Normalized weight for this client
+        normalized_weight = client_factor / total_weight_factor
         
         # Weighted sum of parameters
         for param_name in client_weight_dict:
             if param_name in global_weights:
                 client_param = client_weight_dict[param_name].float()
-                global_param = global_weights[param_name].float()
-                global_weights[param_name] = global_param + client_param
+                # Add weighted contribution: W_k * (n_k / N)
+                global_weights[param_name] += client_param * normalized_weight
             else:
                 print(f"Warning: Parameter {param_name} not found in global weights")
-    
-    # Average the weights
-    num_clients = len(client_ids)
-    for param_name in global_weights:
-        global_weights[param_name] = global_weights[param_name] / num_clients
     
     return global_weights
 
