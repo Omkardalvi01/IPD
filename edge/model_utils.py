@@ -12,6 +12,7 @@ from PIL import Image
 import logging
 from pathlib import Path
 from typing import Tuple, Dict, List, Optional, Union
+from .model import SmallCNN, MediumCNN, LargeCNN
 
 # Configure logging
 logging.basicConfig(
@@ -107,31 +108,23 @@ def get_device() -> torch.device:
     return device
 
 
-def get_model(num_classes: int, device: torch.device, pretrained: bool = True) -> torch.nn.Module:
-    """
-    Get a MobileNetV2 model with the specified number of output classes.
-    
-    Args:
-        num_classes: Number of output classes
-        device: Device to move the model to
-        pretrained: Whether to use pretrained weights
-        
-    Returns:
-        Initialized MobileNetV2 model
-    """
-    from torchvision import models
-    
-    logger.info(f"Creating MobileNetV2 model with {num_classes} classes (pretrained={pretrained})")
-    model = models.mobilenet_v2(pretrained=pretrained)
-    
-    # Replace the last fully connected layer
-    in_features = model.classifier[1].in_features
-    model.classifier[1] = nn.Linear(in_features, num_classes)
-    
-    # Move model to device
+def get_model(
+    num_classes: int,
+    device: torch.device,
+    model_size: str = "medium"
+) -> nn.Module:
+    logger.info(f"Creating {model_size} CNN model")
+
+    if model_size == "small":
+        model = SmallCNN(num_classes)
+    elif model_size == "medium":
+        model = MediumCNN(num_classes)
+    elif model_size == "large":
+        model = LargeCNN(num_classes)
+    else:
+        raise ValueError("model_size must be: small | medium | large")
+
     model = model.to(device)
-    logger.info(f"Model moved to {device}")
-    
     return model
 
 

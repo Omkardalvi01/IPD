@@ -30,8 +30,8 @@ type aggregator struct{
 }
 
 var ( 
-ALGO_LIVE_LINK = "ws://localhost:13000/join"
-ALGO_TEST_LINK = "wss://ipd-allocator-1.onrender.com/ws"
+ALGO_TEST_LINK = "ws://localhost:13000/join"
+ALGO_LIVE_LINK = "wss://ipd-allocator-1.onrender.com/ws"
 )
 
 func main() {

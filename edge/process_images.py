@@ -25,6 +25,11 @@ from tqdm import tqdm
 # Add parent directory to path to allow imports from parent
 sys.path.append(str(Path(__file__).parent.parent))
 
+SMALL = 'small'
+MEDIUM = 'medium'
+LARGE = 'large'
+MODEL_SIZE = MEDIUM  # Change as needed: SMALL, MEDIUM, LARGE
+
 from edge.model_utils import (
     get_model, get_device, create_data_loaders, 
     save_model, load_model, validate_image_file
@@ -179,7 +184,7 @@ class WebSocketTrainer:
             
             # Create fresh model with the correct number of classes
             num_classes = len(self.class_to_idx)
-            self.model = get_model(num_classes, self.device)
+            self.model = get_model(num_classes, self.device, MODEL_SIZE)
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
             self.training_epoch = 0
             
