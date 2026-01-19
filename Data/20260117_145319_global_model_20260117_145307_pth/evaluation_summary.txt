@@ -1,0 +1,31 @@
+============================================================
+FEDERATED LEARNING EVALUATION REPORT
+Timestamp: 2026-01-17 14:53:25
+============================================================
+
+Model File:      global_model_20260117_145307.pth
+Test Dataset:    /home/mihir/Desktop/IPD/IPD-F/mnist_jpg/test
+Test Samples:    12000
+Clients:         4
+Duration:        5.06 seconds
+
+------------------------------
+GLOBAL METRICS
+------------------------------
+Accuracy:        11.28%
+Loss:            2.3026
+Correct:         1353/12000
+
+------------------------------
+PER-CLASS PERFORMANCE
+------------------------------
+0                   : 0.00%
+1                   : 100.00%
+2                   : 0.00%
+3                   : 0.00%
+4                   : 0.00%
+5                   : 0.00%
+6                   : 0.00%
+7                   : 0.00%
+8                   : 0.00%
+9                   : 0.00%

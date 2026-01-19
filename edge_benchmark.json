@@ -1,0 +1,17 @@
+{
+  "final_score": 0.37,
+  "metrics": {
+    "raw_training_ips": 6.07,
+    "stability_index": 1.0,
+    "health_factor": 0.72,
+    "power_factor": 0.5,
+    "network_latency_ms": 999.0
+  },
+  "device_info": {
+    "device_type": "CPU",
+    "cpu_count": 12,
+    "ram_gb": 15.33,
+    "power_plugged": false
+  },
+  "timestamp": 1767870875.2734847
+}

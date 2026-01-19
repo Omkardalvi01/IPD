@@ -1,0 +1,9 @@
+edge/*/
+main/__pycache__/
+main/global_models/*
+algorithm/algo
+venv/
+edge/venv/
+edge/*.txt
+main/*.txt
+main/*/
