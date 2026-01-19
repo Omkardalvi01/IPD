@@ -106,7 +106,7 @@ def get_device() -> torch.device:
     return device
 
 
-def get_model(num_classes: int, device: torch.device, pretrained: bool = True) -> torch.nn.Module:
+def get_model(num_classes: int, device: torch.device, pretrained: bool = True, freeze_features: bool = False) -> torch.nn.Module:
     """
     Get a MobileNetV2 model with the specified number of output classes.
     
@@ -122,6 +122,12 @@ def get_model(num_classes: int, device: torch.device, pretrained: bool = True) -
     
     logger.info(f"Creating MobileNetV2 model with {num_classes} classes (pretrained={pretrained})")
     model = models.mobilenet_v2(pretrained=pretrained)
+    
+    # Freeze feature layers if requested
+    if freeze_features:
+        for param in model.features.parameters():
+            param.requires_grad = False
+        logger.info("Frozen MobileNetV2 feature layers")
     
     # Replace the last fully connected layer
     in_features = model.classifier[1].in_features
@@ -231,7 +237,8 @@ def save_model(
 
 def load_model(
     path: Union[str, Path],
-    device: Optional[torch.device] = None
+    device: Optional[torch.device] = None,
+    freeze_features: bool = False
 ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, Dict[str, int], Dict[str, object]]:
     """
     Load a model checkpoint.
@@ -253,7 +260,7 @@ def load_model(
     num_classes = checkpoint.get('num_classes', len(checkpoint['class_to_idx']))
     
     # Initialize model
-    model = get_model(num_classes=num_classes, device=device, pretrained=False)
+    model = get_model(num_classes=num_classes, device=device, pretrained=False, freeze_features=freeze_features)
     model.load_state_dict(checkpoint['model_state_dict'])
     
     # Initialize optimizer

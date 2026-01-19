@@ -183,29 +183,29 @@ class WebSocketTrainer:
             if os.path.exists(self.model_save_path):
                 try:
                     logger.info(f"Loading existing model from {self.model_save_path}")
-                    self.model, self.optimizer, loaded_class_to_idx, _ = load_model(self.model_save_path, self.device)
+                    self.model, self.optimizer, loaded_class_to_idx, _ = load_model(self.model_save_path, self.device, freeze_features=True)
                     
                     current_out_features = self.model.classifier[1].out_features
                     if current_out_features != num_classes:
                         logger.warning(f"Model class count mismatch (Saved: {current_out_features}, New: {num_classes}). Resetting model.")
-                        self.model = get_model(num_classes, self.device)
-                        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+                        self.model = get_model(num_classes, self.device, freeze_features=True)
+                        self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self.learning_rate)
                     else:
                         projected_class_names = sorted(list(self.class_to_idx.keys()))
                         loaded_class_names = sorted(list(loaded_class_to_idx.keys()))
                         if projected_class_names != loaded_class_names:
                              logger.warning(f"Class names mismatch. Resetting model to avoid label confusion.")
-                             self.model = get_model(num_classes, self.device)
-                             self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+                             self.model = get_model(num_classes, self.device, freeze_features=True)
+                             self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self.learning_rate)
                         
                 except Exception as e:
                     logger.error(f"Failed to load existing model: {e}. Starting fresh.")
-                    self.model = get_model(num_classes, self.device)
-                    self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+                    self.model = get_model(num_classes, self.device, freeze_features=True)
+                    self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self.learning_rate)
             else:
                 logger.info("No existing model found. Starting fresh.")
-                self.model = get_model(num_classes, self.device)
-                self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+                self.model = get_model(num_classes, self.device, freeze_features=True)
+                self.optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self.learning_rate)
 
             self.training_epoch = 0 # In a real scenario, we might want to continue epoch count
 
