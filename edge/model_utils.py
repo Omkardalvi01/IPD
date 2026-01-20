@@ -11,6 +11,7 @@ from torchvision.datasets import ImageFolder
 from PIL import Image
 import logging
 from pathlib import Path
+import re
 from typing import Tuple, Dict, List, Optional, Union
 
 # Configure logging
@@ -20,6 +21,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def natural_sort_key(s):
+    """Sort strings with numbers in a way that humans expect (1, 2, 10 instead of 1, 10, 2)"""
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split('([0-9]+)', str(s))]
 
 class CustomImageDataset(Dataset):
     """Custom dataset for handling images with class names in filenames."""
@@ -65,7 +70,7 @@ class CustomImageDataset(Dataset):
             raise ValueError(f"No valid images found in {self.data_dir}")
         
         # Create class_to_idx mapping
-        unique_classes = sorted(set(class_name for _, class_name in image_files))
+        unique_classes = sorted(set(class_name for _, class_name in image_files), key=natural_sort_key)
         self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(unique_classes)}
         
         # Create image paths and labels lists

@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import glob
+import re
 import shutil
 import logging
 from datetime import datetime
@@ -40,6 +41,11 @@ logger = logging.getLogger(__name__)
 
 sys.path.append('../edge')
 sys.path.append('../aggregator')
+
+def natural_sort_key(s):
+    """Sort strings with numbers in a way that humans expect (1, 2, 10 instead of 1, 10, 2)"""
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split('([0-9]+)', str(s))]
 
 class DatasetConfig:
     """Configuration class for dataset-specific parameters"""
@@ -105,7 +111,7 @@ class DatasetConfig:
                     with open(labels_file, 'r') as f:
                         labels = json.load(f)
                     
-                    unique_labels = sorted(set(str(v) for v in labels.values()))
+                    unique_labels = sorted(set(str(v) for v in labels.values()), key=natural_sort_key)
                     self.num_classes = len(unique_labels)
                     self.class_names = unique_labels
                     logger.info(f"Detected {self.num_classes} classes from labels.json")
@@ -145,7 +151,7 @@ class DatasetConfig:
                     classes.add(potential_label)
         
         if classes:
-            self.class_names = sorted(list(classes))
+            self.class_names = sorted(list(classes), key=natural_sort_key)
             self.num_classes = len(self.class_names)
             logger.info(f"Detected {self.num_classes} classes from filenames: {self.class_names[:5]}...")
     

@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import uuid
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -41,6 +42,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def natural_sort_key(s):
+    """Sort strings with numbers in a way that humans expect (1, 2, 10 instead of 1, 10, 2)"""
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split('([0-9]+)', str(s))]
 
 class WebSocketTrainer:
     """WebSocket-based trainer class for incremental learning."""
@@ -95,7 +100,7 @@ class WebSocketTrainer:
                     class_name = filename.split('#')[0]
                     classes.add(class_name)
         
-        classes = sorted(list(classes))
+        classes = sorted(list(classes), key=natural_sort_key)
         logger.info(f"Discovered classes: {classes}")
         return {cls_name: idx for idx, cls_name in enumerate(classes)}
     
