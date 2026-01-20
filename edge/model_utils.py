@@ -54,8 +54,11 @@ class CustomImageDataset(Dataset):
                 # 2. mnist_train_XXXXX_label_Y.jpg
                 if 'label_' in filename:
                     # MNIST format: extract the label after 'label_'
-                    class_name = filename.split('label_')[-1].split('.')[0]
-                    image_files.append((file_path, class_name))
+                    parts = filename.split('label_')
+                    if len(parts) > 1:
+                        # Extract next char after label_
+                        class_name = parts[-1][0]
+                        image_files.append((file_path, class_name))
                 elif '#' in filename:
                     # Original format: class#image.jpg
                     class_name = filename.split('#')[0]

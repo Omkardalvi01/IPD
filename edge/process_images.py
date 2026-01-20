@@ -87,9 +87,11 @@ class WebSocketTrainer:
                 # 1. class#image.jpg
                 # 2. mnist_train_XXXXX_label_Y.jpg
                 if 'label_' in filename:
-                    # MNIST format: extract the label after 'label_'
-                    label = filename.split('label_')[-1].split('.')[0]
-                    classes.add(label)
+                    # MNIST format: extract the char after 'label_'
+                    parts = filename.split('label_')
+                    if len(parts) > 1:
+                        label = parts[-1][0]
+                        classes.add(label)
                 elif '#' in filename:
                     # Original format: class#image.jpg
                     class_name = filename.split('#')[0]
@@ -154,6 +156,8 @@ class WebSocketTrainer:
                     self.learning_rate = float(hyperparams['learning_rate'])
                 if hyperparams.get('epochs') is not None:
                     self.num_epochs = int(hyperparams['epochs'])
+                if hyperparams.get('num_classes') is not None:
+                    logger.info(f"Using forced num_classes from hyperparams: {hyperparams['num_classes']}")
                 
                 logger.info(f"Using hyperparams: Batch={self.batch_size}, LR={self.learning_rate}, Epochs={self.num_epochs}")
 
@@ -190,14 +194,18 @@ class WebSocketTrainer:
             logger.info(f"Discovered {len(self.class_to_idx)} classes: {list(self.class_to_idx.keys())}")
             
             # Initialize model
-            num_classes = len(self.class_to_idx)
+            # Use num_classes from hyperparams if provided, otherwise discover from local data
+            forced_classes = hyperparams.get('num_classes') if hyperparams else None
+            num_classes = int(forced_classes) if forced_classes is not None else len(self.class_to_idx)
+            
+            logger.info(f"INITIALIZING MODEL with {num_classes} classes")
             self.model = get_model(num_classes, self.device)
             
             # Load initial weights if provided
             if hyperparams and 'model_path' in hyperparams and hyperparams['model_path']:
                 model_path = hyperparams['model_path']
                 if os.path.exists(model_path):
-                    logger.info(f"Loading initial weights from {model_path}")
+                    logger.info(f"LOADING GLOBAL WEIGHTS from: {model_path}")
                     try:
                         checkpoint = torch.load(model_path, map_location=self.device)
                         

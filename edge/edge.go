@@ -63,7 +63,7 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 
 	// Send file marker and name - use the actual filename from Python output
 	// Use .pth for model weights
-	sendfilename := fmt.Sprintf("%s.pth", uid)
+	sendfilename := fmt.Sprintf("%s.txt", uid)
 	err = dc.SendText("FILE:" + sendfilename)
 
 	if err != nil {
@@ -404,6 +404,7 @@ func main() {
 					} else {
 						filesMutex.Lock()
 						hyperparams = params
+						receivedFiles = 0 // Reset counter for new round
 						filesMutex.Unlock()
 						log.Printf("Received hyperparameters: %+v", params)
 					}
@@ -420,14 +421,22 @@ func main() {
 						log.Printf("Received allocation percentage: %d%%", perc)
 					}
 				} else {
+					// This is a filename
 					file_name = msgText
 					file_path := filepath.Join(dir_name, file_name)
-					log.Printf("Starting to receive file: %s", file_name)
+
+					if strings.HasSuffix(file_name, ".pth") {
+						log.Printf("**************************************************")
+						log.Printf("RECEIVING GLOBAL MODEL BROADCAST: %s", file_name)
+						log.Printf("**************************************************")
+					} else {
+						log.Printf("STARTING TO RECEIVE FILE: %s", file_name)
+					}
 					totalBytesReceived = 0
 					rxChunkCount = 0
 					f, err = os.Create(file_path)
 					if err != nil {
-						log.Fatal("Error while creating file", err)
+						log.Fatal("Error while creating file ", file_path, ": ", err)
 					}
 				}
 
@@ -444,12 +453,12 @@ func main() {
 					if f != nil {
 						n, err := io.Copy(f, bytes.NewBuffer(msg.Data))
 						if err != nil {
-							log.Fatal("Error while copying file", err)
+							log.Fatal("Error while copying file data: ", err)
 						}
 						totalBytesReceived += n
 						rxChunkCount++
-						if rxChunkCount % 50 == 0 {
-							log.Printf("Received %d chunks (%d bytes) for %s", rxChunkCount, totalBytesReceived, file_name)
+						if rxChunkCount%50 == 0 {
+							log.Printf("Receiving data for %s: %d chunks (%d bytes) so far...", file_name, rxChunkCount, totalBytesReceived)
 						}
 					}
 				}

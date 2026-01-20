@@ -5,31 +5,30 @@ from datetime import datetime
 from pathlib import Path
 
 # Add parent directories to path to allow both direct and module imports
-project_root = Path(__file__).parent.parent.parent
+BASE_DIR = Path(__file__).parent
+project_root = BASE_DIR.parent
 sys.path.append(str(project_root))
 
 # Import local modules
 try:
-    from IPD.aggregator.aggregate import (
-        load_client_payloads,
-        fedavg_aggregate,
-        save_global_model
-    )
-    from IPD.aggregator.validate_weights import validate_edge_weights
-except ImportError:
-    # Fallback for direct script execution
     from aggregate import (
         load_client_payloads,
         fedavg_aggregate,
         save_global_model
     )
     from validate_weights import validate_edge_weights
+except ImportError:
+    from main.aggregate import (
+        load_client_payloads,
+        fedavg_aggregate,
+        save_global_model
+    )
+    from main.validate_weights import validate_edge_weights
 
 app = Flask(__name__)
 
-# Directory configuration
-BASE_DIR = Path(__file__).parent
-OUTPUT_DIR = BASE_DIR / "outputs"
+# Directory configuration - Synchronize with controller base (project root)
+OUTPUT_DIR = project_root / "outputs"
 GLOBAL_WEIGHTS_DIR = BASE_DIR / "global_models"
 
 # Create directories if they don't exist
@@ -61,32 +60,66 @@ def receive_uids():
             }), 400
 
         uids = data['uids']
+        subdir = data.get('directory', '')
         
+        # Determine the search directory - Robustly check multiple possible locations
+        possible_bases = [
+            OUTPUT_DIR,
+            BASE_DIR / "outputs",
+            project_root / "main" / "outputs"
+        ]
+        
+        search_dir = None
+        if subdir:
+            for base in possible_bases:
+                temp_dir = base / subdir
+                if temp_dir.exists():
+                    search_dir = temp_dir
+                    break
+        
+        if search_dir is None:
+            # Fallback for non-subdir requests or if subdir not found in any base
+            search_dir = OUTPUT_DIR
+            if subdir:
+                search_dir = OUTPUT_DIR / subdir
+            
+        if not search_dir.exists():
+             return jsonify({
+                "status": "error",
+                "message": f"Directory not found: {search_dir} (Checked bases: {[str(b) for b in possible_bases]})",
+                "count": 0
+            }), 404
+
         # Check which weight files exist
         existing_files = []
         missing_files = []
         for uid in uids:
-            weight_file = os.path.join(OUTPUT_DIR, f"{uid}.txt")
-            if os.path.exists(weight_file):
+            weight_file = search_dir / f"{uid}.txt"
+            if weight_file.exists():
                 existing_files.append(uid)
             else:
                 missing_files.append(uid)
 
         # Get weight files for the specified UIDs
-        weight_files = [os.path.join(OUTPUT_DIR, f"{uid}.txt") for uid in uids]
+        weight_files = [str(search_dir / f"{uid}.txt") for uid in uids if uid in existing_files]
         
+        if not weight_files:
+            return jsonify({
+                "status": "error",
+                "message": "No valid weight files found",
+                "count": 0
+            }), 400
+
         # Validate all weight files
-        # print("Validating edge weight files...") # logging suppressed
         success, client_weights = validate_edge_weights(weight_files)
         if not success:
-            return jsonify({"error": "Weight validation failed"}), 400
+            return jsonify({"error": f"Weight validation failed: {client_weights}"}), 400
 
         # Augment client_weights with 'factor' (percentage) from the files
-        # validate_edge_weights only returns tensors, we need to re-read headers
         augmented_weights = {}
         for uid in uids:
             if uid in client_weights:
-                weight_file = os.path.join(OUTPUT_DIR, f"{uid}.txt")
+                weight_file = search_dir / f"{uid}.txt"
                 percentage = 1.0
                 try:
                     with open(weight_file, 'r') as f:
@@ -109,7 +142,7 @@ def receive_uids():
         aggregation_dir = os.path.join(GLOBAL_WEIGHTS_DIR, f"aggregation_{timestamp}")
         os.makedirs(aggregation_dir, exist_ok=True)
 
-        # Save the aggregated weights and get the saved paths
+        # Save the aggregated weights and get the saved paths (model_info is a dict)
         model_info = save_global_model(global_weights, aggregation_dir)
         
         # Get the full path to the saved model file

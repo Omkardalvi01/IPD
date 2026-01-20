@@ -110,6 +110,32 @@ func main() {
 		log.Fatal("Error while reading dir: ", err)
 	}
 
+	// Detect num_classes by counting subdirectories in trainDir (if nested) or reading labels.json
+	numClasses := 10 // Default for MNIST
+	if entries, err := os.ReadDir(trainDir); err == nil {
+		classCount := 0
+		for _, entry := range entries {
+			if entry.IsDir() {
+				classCount++
+			}
+		}
+		if classCount > 0 {
+			numClasses = classCount
+		} else {
+			// Check for labels_train.json if it's flat
+			labelsPath := filepath.Join(trainDir, "labels_train.json")
+			if data, err := os.ReadFile(labelsPath); err == nil {
+				var labelData struct {
+					NumClasses int `json:"num_classes"`
+				}
+				if err := json.Unmarshal(data, &labelData); err == nil && labelData.NumClasses > 0 {
+					numClasses = labelData.NumClasses
+				}
+			}
+		}
+	}
+	fmt.Printf("Detected %d classes\n", numClasses)
+
 	// Get number of workers
 	var numWorkers int
 	MaxWorkers := runtime.NumCPU()
@@ -214,6 +240,7 @@ func main() {
 			"epochs":        numEpochs,
 			"batch_size":    batchSize,
 			"learning_rate": learningRate,
+			"num_classes":   numClasses,
 		}
 		
 		if globalModelPath != "" {
@@ -295,7 +322,8 @@ func main() {
 		}
 
 		requestData := map[string]interface{}{
-			"uids": edgeIDs,
+			"uids":      edgeIDs,
+			"directory": roundFolder,
 		}
 		
 		jsonData, err := json.Marshal(requestData)
