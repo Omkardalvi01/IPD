@@ -126,7 +126,7 @@ class DatasetConfig:
             return False
     
     def _detect_classes_from_filenames(self, data_dir: str):
-        """Detect classes from filename patterns"""
+        """Detect classes from filename patterns - FIXED to match training logic"""
         classes = set()
         image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
         
@@ -134,15 +134,16 @@ class DatasetConfig:
             if file.is_file() and file.suffix.lower() in image_extensions:
                 filename = file.name
                 
+                # FIXED: Prioritize label_ pattern (MNIST format) - same as training code
                 if 'label_' in filename:
+                    # MNIST format: extract the label after 'label_'
                     label = filename.split('label_')[-1].split('.')[0]
                     classes.add(label)
                 elif '#' in filename:
+                    # Original format: class#image.jpg
                     class_name = filename.split('#')[0]
                     classes.add(class_name)
-                elif '_' in filename:
-                    potential_label = filename.split('_')[0]
-                    classes.add(potential_label)
+                # REMOVED: The buggy '_' fallback that was extracting wrong parts
         
         if classes:
             self.class_names = sorted(list(classes))
@@ -201,7 +202,7 @@ class ImageDataset(Dataset):
         logger.info(f"Loaded {len(self.samples)} samples from {data_dir}")
     
     def _load_samples(self):
-        """Load image files and labels"""
+        """Load image files and labels - FIXED to ensure class_to_idx is never empty"""
         labels_map = {}
         metadata_dir = self.data_dir / "_metadata"
         if metadata_dir.exists():
@@ -210,10 +211,29 @@ class ImageDataset(Dataset):
                 with open(labels_file, 'r') as f:
                     labels_map = json.load(f)
         
+        # FIXED: Ensure class_to_idx is NEVER empty
         if self.config.class_names:
             class_to_idx = {cls_name: idx for idx, cls_name in enumerate(self.config.class_names)}
         else:
-            class_to_idx = {}
+            # Auto-detect classes from filenames if not provided
+            logger.info("No class_names in config, auto-detecting from filenames...")
+            classes = set()
+            for file in self.data_dir.iterdir():
+                if file.is_file() and file.suffix.lower() in self.image_extensions:
+                    if 'label_' in file.name:
+                        label = file.name.split('label_')[-1].split('.')[0]
+                        classes.add(label)
+                    elif '#' in file.name:
+                        class_name = file.name.split('#')[0]
+                        classes.add(class_name)
+            
+            if classes:
+                self.config.class_names = sorted(list(classes))
+                class_to_idx = {cls_name: idx for idx, cls_name in enumerate(self.config.class_names)}
+                logger.info(f"Auto-detected {len(classes)} classes: {sorted(classes)}")
+            else:
+                class_to_idx = {}
+                logger.warning("Could not auto-detect classes, using empty mapping")
         
         for file in self.data_dir.iterdir():
             if file.is_file() and file.suffix.lower() in self.image_extensions:
@@ -222,28 +242,38 @@ class ImageDataset(Dataset):
                 label = None
                 if filename in labels_map:
                     label_str = str(labels_map[filename])
-                    label = class_to_idx.get(label_str, int(label_str) if label_str.isdigit() else 0)
+                    label = class_to_idx.get(label_str, int(label_str) if label_str.isdigit() else None)
                 else:
                     label = self._extract_label_from_filename(filename, class_to_idx)
                 
                 if label is not None:
                     self.samples.append((str(file), label))
+                else:
+                    logger.warning(f"Skipping file with no valid label: {filename}")
     
     def _extract_label_from_filename(self, filename: str, class_to_idx: Dict[str, int]) -> Optional[int]:
-        """Extract label from filename using various patterns"""
+        """Extract label from filename - FIXED to match training logic exactly"""
+        # FIXED: Use EXACT same logic as model_utils.py CustomImageDataset
         if 'label_' in filename:
-            label_str = filename.split('label_')[-1].split('.')[0]
-            return class_to_idx.get(label_str, int(label_str) if label_str.isdigit() else 0)
+            # MNIST format: extract the label after 'label_'
+            class_name = filename.split('label_')[-1].split('.')[0]
+            # Use class_to_idx mapping if available, otherwise convert to int
+            if class_name in class_to_idx:
+                return class_to_idx[class_name]
+            elif class_name.isdigit():
+                return int(class_name)
+            else:
+                logger.warning(f"Could not extract numeric label from {filename}")
+                return None
         
         if '#' in filename:
+            # Original format: class#image.jpg
             class_name = filename.split('#')[0]
-            return class_to_idx.get(class_name, 0)
+            return class_to_idx.get(class_name, None)
         
-        if '_' in filename:
-            potential_label = filename.split('_')[0]
-            return class_to_idx.get(potential_label, int(potential_label) if potential_label.isdigit() else 0)
-        
-        return hash(filename) % self.config.num_classes
+        # FIXED: Removed buggy fallbacks - return None instead of random hash
+        logger.warning(f"Could not extract label from filename: {filename}")
+        return None
     
     def __len__(self):
         return len(self.samples)

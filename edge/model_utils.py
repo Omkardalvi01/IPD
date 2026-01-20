@@ -24,21 +24,19 @@ logger = logging.getLogger(__name__)
 class CustomImageDataset(Dataset):
     """Custom dataset for handling images with class names in filenames."""
     
-    def __init__(self, data_dir: Union[str, Path], transform=None, class_to_idx: Optional[Dict[str, int]] = None):
+    def __init__(self, data_dir: Union[str, Path], transform=None):
         """
         Initialize the dataset.
         
         Args:
             data_dir: Directory containing images with filenames like "class#image.jpg"
             transform: Optional transform to be applied on images
-            class_to_idx: Optional dictionary mapping class names to indices. 
-                         If provided, only images belonging to these classes will be loaded.
         """
         self.data_dir = Path(data_dir)
         self.transform = transform
         self.image_paths = []
         self.labels = []
-        self.class_to_idx = class_to_idx
+        self.class_to_idx = {}
         
         self._load_data()
     
@@ -66,24 +64,17 @@ class CustomImageDataset(Dataset):
         if not image_files:
             raise ValueError(f"No valid images found in {self.data_dir}")
         
-        # Create class_to_idx mapping if not provided
-        if self.class_to_idx is None:
-            unique_classes = sorted(set(class_name for _, class_name in image_files))
-            self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(unique_classes)}
+        # Create class_to_idx mapping
+        unique_classes = sorted(set(class_name for _, class_name in image_files))
+        self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(unique_classes)}
         
         # Create image paths and labels lists
-        ignored_count = 0
         for file_path, class_name in image_files:
             if validate_image_file(file_path):  # Only add valid images
-                if class_name in self.class_to_idx:
-                    self.image_paths.append(file_path)
-                    self.labels.append(self.class_to_idx[class_name])
-                else:
-                    ignored_count += 1
+                self.image_paths.append(file_path)
+                self.labels.append(self.class_to_idx[class_name])
         
-        logger.info(f"Loaded {len(self.image_paths)} valid images from {len(self.class_to_idx)} classes")
-        if ignored_count > 0:
-            logger.warning(f"Ignored {ignored_count} images not belonging to the global class list")
+        logger.info(f"Loaded {len(self.image_paths)} valid images from {len(unique_classes)} classes")
         logger.info(f"Classes: {list(self.class_to_idx.keys())}")
     
     def __len__(self):
@@ -148,8 +139,7 @@ def create_data_loaders(
     batch_size: int = 32,
     img_size: int = 224,
     num_workers: int = 2,
-    augment: bool = False,
-    class_to_idx: Optional[Dict[str, int]] = None
+    augment: bool = False
 ) -> Tuple[DataLoader, Dict[str, int]]:
     """
     Create data loaders for training.
@@ -185,7 +175,7 @@ def create_data_loaders(
     transform = transforms.Compose(transform_list)
     
     # Create custom dataset
-    dataset = CustomImageDataset(data_dir, transform=transform, class_to_idx=class_to_idx)
+    dataset = CustomImageDataset(data_dir, transform=transform)
     
     if len(dataset) == 0:
         raise ValueError(f"No valid images found in {data_dir}")

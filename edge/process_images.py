@@ -78,14 +78,25 @@ class WebSocketTrainer:
         logger.info(f"Model save path: {self.model_save_path}")
     
     def _discover_classes(self, data_dir: Path) -> Dict[str, int]:
-        """
-        Define global classes (0-9).
-        Ignoring local discovery to enforce global consistency.
-        """
-        # GLOBAL CLASS MAPPING ENFORCEMENT
-        # This ensures all clients map "0" to index 0, "1" to index 1, etc.
-        classes = [str(i) for i in range(10)]
-        logger.info(f"Using GLOBAL FIXED classes: {classes}")
+        """Discover classes from filenames."""
+        classes = set()
+        for file in data_dir.iterdir():
+            if file.is_file() and self._is_image_file(file.name):
+                filename = file.name
+                # Handle both formats:
+                # 1. class#image.jpg
+                # 2. mnist_train_XXXXX_label_Y.jpg
+                if 'label_' in filename:
+                    # MNIST format: extract the label after 'label_'
+                    label = filename.split('label_')[-1].split('.')[0]
+                    classes.add(label)
+                elif '#' in filename:
+                    # Original format: class#image.jpg
+                    class_name = filename.split('#')[0]
+                    classes.add(class_name)
+        
+        classes = sorted(list(classes))
+        logger.info(f"Discovered classes: {classes}")
         return {cls_name: idx for idx, cls_name in enumerate(classes)}
     
     def _count_images(self, data_dir: Path) -> int:
@@ -205,8 +216,7 @@ class WebSocketTrainer:
                     str(data_path),
                     batch_size=self.batch_size,
                     num_workers=2,
-                    augment=True,
-                    class_to_idx=self.class_to_idx  # PASS GLOBAL MAPPING
+                    augment=True
                 )
             except Exception as e:
                 error_msg = f"Error creating data loaders: {e}"
