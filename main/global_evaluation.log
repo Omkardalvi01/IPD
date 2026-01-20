@@ -157,3 +157,109 @@
 2026-01-17 09:52:47,128 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
 2026-01-17 09:52:47,129 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
 2026-01-17 09:52:47,717 - INFO - Evaluation plot saved to: ./evaluation_results/20260117_095245_global_model_20260117_095232_pth/plots/evaluation_20260117_095247.png
+2026-01-20 08:59:25,415 - INFO - Using device: cpu
+2026-01-20 08:59:25,416 - INFO - Saving run results to: /home/mihir/Desktop/IPD/IPD-F/main/evaluation_results/20260120_085925_global_model_20260120_085912_pth
+2026-01-20 08:59:25,416 - INFO - Auto-detecting dataset configuration...
+2026-01-20 08:59:25,417 - INFO - Detected 10 classes from filenames: ['0', '1', '2', '3', '4']...
+2026-01-20 08:59:25,420 - INFO - Detected image properties: 1 native channels, mode: L, original size: (28, 28)
+2026-01-20 08:59:25,420 - INFO - Using 3 channels for model compatibility
+2026-01-20 08:59:25,420 - INFO - Auto-detected dataset config: 10 classes, 3 channels, size (28, 28)
+2026-01-20 08:59:25,421 - INFO - Saved dataset config to ./evaluation_results/20260120_085925_global_model_20260120_085912_pth/dataset_config.json
+2026-01-20 08:59:25,421 - INFO - Global Model Evaluator initialized
+2026-01-20 08:59:25,421 - INFO - Controller data: mnist_600/test
+2026-01-20 08:59:25,421 - INFO - Results directory: ./evaluation_results/20260120_085925_global_model_20260120_085912_pth
+2026-01-20 08:59:25,421 - INFO - Device: cpu
+2026-01-20 08:59:25,421 - INFO - Dataset: test, Classes: 10
+2026-01-20 08:59:25,421 - INFO - Loading model from: /home/mihir/Desktop/IPD/IPD-F/main/global_models/aggregation_20260120_085912/global_model_20260120_085912.pth
+2026-01-20 08:59:25,421 - INFO - Loading model from: /home/mihir/Desktop/IPD/IPD-F/main/global_models/aggregation_20260120_085912/global_model_20260120_085912.pth
+2026-01-20 08:59:25,440 - INFO - Checkpoint keys: ['features.0.0.weight', 'features.0.1.weight', 'features.0.1.bias', 'features.0.1.running_mean', 'features.0.1.running_var', 'features.1.conv.0.0.weight', 'features.1.conv.0.1.weight', 'features.1.conv.0.1.bias', 'features.1.conv.0.1.running_mean', 'features.1.conv.0.1.running_var']...
+2026-01-20 08:59:25,440 - WARNING - Could not determine model architecture from checkpoint. Attempting to infer...
+2026-01-20 08:59:25,440 - INFO - Detected MobileNetV2-like architecture
+2026-01-20 08:59:25,498 - INFO - Successfully loaded weights into MobileNetV2
+2026-01-20 08:59:25,503 - INFO - Found 120 image files in controller data
+2026-01-20 08:59:25,504 - INFO - Loaded 120 samples from mnist_600/test
+2026-01-20 08:59:25,504 - INFO - Test data loaded: 120 samples
+2026-01-20 08:59:25,518 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 08:59:25,519 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 08:59:25,873 - INFO - Class distribution plot saved to: ./evaluation_results/20260120_085925_global_model_20260120_085912_pth/class_distribution.png
+2026-01-20 08:59:25,873 - INFO - Starting evaluation...
+2026-01-20 08:59:26,524 - INFO - Confusion matrix saved to: ./evaluation_results/20260120_085925_global_model_20260120_085912_pth/confusion_matrix.png
+2026-01-20 08:59:26,524 - INFO - Global Model Results:
+2026-01-20 08:59:26,524 - INFO -   Accuracy: 0.1750 (21/120)
+2026-01-20 08:59:26,524 - INFO -   Loss: 2.3933
+2026-01-20 08:59:26,524 - INFO -   Per-class accuracy (top 5):
+2026-01-20 08:59:26,524 - INFO -     0: 0.0000
+2026-01-20 08:59:26,524 - INFO -     1: 1.0000
+2026-01-20 08:59:26,524 - INFO -     2: 0.0000
+2026-01-20 08:59:26,524 - INFO -     3: 0.0000
+2026-01-20 08:59:26,524 - INFO -     4: 0.0000
+2026-01-20 08:59:26,525 - INFO - 
+============================================================
+2026-01-20 08:59:26,525 - INFO - EVALUATION COMPLETED SUCCESSFULLY
+2026-01-20 08:59:26,525 - INFO - ============================================================
+2026-01-20 08:59:26,525 - INFO - Model: global_model_20260120_085912.pth
+2026-01-20 08:59:26,525 - INFO - Clients: 2
+2026-01-20 08:59:26,525 - INFO - Test Accuracy: 0.1750
+2026-01-20 08:59:26,525 - INFO - Test Loss: 2.3933
+2026-01-20 08:59:26,525 - INFO - Time Taken: 0.65s
+2026-01-20 08:59:26,525 - INFO - Results saved to: /home/mihir/Desktop/IPD/IPD-F/main/evaluation_results/20260120_085925_global_model_20260120_085912_pth
+2026-01-20 08:59:26,525 - INFO - Summary Report: /home/mihir/Desktop/IPD/IPD-F/main/evaluation_results/20260120_085925_global_model_20260120_085912_pth/evaluation_summary.txt
+2026-01-20 08:59:26,643 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 08:59:26,643 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 08:59:27,195 - INFO - Evaluation plot saved to: ./evaluation_results/20260120_085925_global_model_20260120_085912_pth/plots/evaluation_20260120_085926.png
+2026-01-20 08:59:27,211 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 08:59:27,212 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 08:59:27,739 - INFO - Evaluation plot saved to: ./evaluation_results/20260120_085925_global_model_20260120_085912_pth/plots/evaluation_20260120_085927.png
+2026-01-20 09:08:46,238 - INFO - Using device: cpu
+2026-01-20 09:08:46,242 - INFO - Saving run results to: /home/mihir/Desktop/IPD/IPD-F/main/evaluation_results/20260120_090846_global_model_20260120_090831_pth
+2026-01-20 09:08:46,242 - INFO - Auto-detecting dataset configuration...
+2026-01-20 09:08:46,244 - INFO - Detected 10 classes from filenames: ['0', '1', '2', '3', '4']...
+2026-01-20 09:08:46,248 - INFO - Detected image properties: 1 native channels, mode: L, original size: (28, 28)
+2026-01-20 09:08:46,248 - INFO - Using 3 channels for model compatibility
+2026-01-20 09:08:46,248 - INFO - Auto-detected dataset config: 10 classes, 3 channels, size (28, 28)
+2026-01-20 09:08:46,248 - INFO - Saved dataset config to ./evaluation_results/20260120_090846_global_model_20260120_090831_pth/dataset_config.json
+2026-01-20 09:08:46,248 - INFO - Global Model Evaluator initialized
+2026-01-20 09:08:46,248 - INFO - Controller data: mnist_600/test
+2026-01-20 09:08:46,248 - INFO - Results directory: ./evaluation_results/20260120_090846_global_model_20260120_090831_pth
+2026-01-20 09:08:46,248 - INFO - Device: cpu
+2026-01-20 09:08:46,248 - INFO - Dataset: test, Classes: 10
+2026-01-20 09:08:46,248 - INFO - Loading model from: /home/mihir/Desktop/IPD/IPD-F/main/global_models/aggregation_20260120_090831/global_model_20260120_090831.pth
+2026-01-20 09:08:46,248 - INFO - Loading model from: /home/mihir/Desktop/IPD/IPD-F/main/global_models/aggregation_20260120_090831/global_model_20260120_090831.pth
+2026-01-20 09:08:46,270 - INFO - Checkpoint keys: ['features.0.0.weight', 'features.0.1.weight', 'features.0.1.bias', 'features.0.1.running_mean', 'features.0.1.running_var', 'features.1.conv.0.0.weight', 'features.1.conv.0.1.weight', 'features.1.conv.0.1.bias', 'features.1.conv.0.1.running_mean', 'features.1.conv.0.1.running_var']...
+2026-01-20 09:08:46,270 - WARNING - Could not determine model architecture from checkpoint. Attempting to infer...
+2026-01-20 09:08:46,270 - INFO - Detected MobileNetV2-like architecture
+2026-01-20 09:08:46,325 - INFO - Successfully loaded weights into MobileNetV2
+2026-01-20 09:08:46,328 - INFO - Found 120 image files in controller data
+2026-01-20 09:08:46,329 - INFO - Loaded 120 samples from mnist_600/test
+2026-01-20 09:08:46,329 - INFO - Test data loaded: 120 samples
+2026-01-20 09:08:46,344 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 09:08:46,344 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 09:08:46,702 - INFO - Class distribution plot saved to: ./evaluation_results/20260120_090846_global_model_20260120_090831_pth/class_distribution.png
+2026-01-20 09:08:46,702 - INFO - Starting evaluation...
+2026-01-20 09:08:47,517 - INFO - Confusion matrix saved to: ./evaluation_results/20260120_090846_global_model_20260120_090831_pth/confusion_matrix.png
+2026-01-20 09:08:47,518 - INFO - Global Model Results:
+2026-01-20 09:08:47,518 - INFO -   Accuracy: 0.1500 (18/120)
+2026-01-20 09:08:47,518 - INFO -   Loss: 2.6304
+2026-01-20 09:08:47,518 - INFO -   Per-class accuracy (top 5):
+2026-01-20 09:08:47,518 - INFO -     0: 0.0000
+2026-01-20 09:08:47,518 - INFO -     1: 0.5238
+2026-01-20 09:08:47,518 - INFO -     2: 0.8750
+2026-01-20 09:08:47,518 - INFO -     3: 0.0000
+2026-01-20 09:08:47,518 - INFO -     4: 0.0000
+2026-01-20 09:08:47,519 - INFO - 
+============================================================
+2026-01-20 09:08:47,519 - INFO - EVALUATION COMPLETED SUCCESSFULLY
+2026-01-20 09:08:47,519 - INFO - ============================================================
+2026-01-20 09:08:47,519 - INFO - Model: global_model_20260120_090831.pth
+2026-01-20 09:08:47,519 - INFO - Clients: 2
+2026-01-20 09:08:47,519 - INFO - Test Accuracy: 0.1500
+2026-01-20 09:08:47,519 - INFO - Test Loss: 2.6304
+2026-01-20 09:08:47,519 - INFO - Time Taken: 0.82s
+2026-01-20 09:08:47,519 - INFO - Results saved to: /home/mihir/Desktop/IPD/IPD-F/main/evaluation_results/20260120_090846_global_model_20260120_090831_pth
+2026-01-20 09:08:47,519 - INFO - Summary Report: /home/mihir/Desktop/IPD/IPD-F/main/evaluation_results/20260120_090846_global_model_20260120_090831_pth/evaluation_summary.txt
+2026-01-20 09:08:47,654 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 09:08:47,655 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 09:08:48,355 - INFO - Evaluation plot saved to: ./evaluation_results/20260120_090846_global_model_20260120_090831_pth/plots/evaluation_20260120_090847.png
+2026-01-20 09:08:48,376 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 09:08:48,376 - INFO - Using categorical units to plot a list of strings that are all parsable as floats or dates. If these strings should be plotted as numbers, cast to the appropriate data type before plotting.
+2026-01-20 09:08:49,043 - INFO - Evaluation plot saved to: ./evaluation_results/20260120_090846_global_model_20260120_090831_pth/plots/evaluation_20260120_090848.png
