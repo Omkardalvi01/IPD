@@ -21,6 +21,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class MediumCNN(nn.Module):
+    def __init__(self, num_classes=10):
+        super(MediumCNN, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2)
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, 128),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(128, num_classes)
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.classifier(x)
+        return x
+
+
 class CustomImageDataset(Dataset):
     """Custom dataset for handling images with class names in filenames."""
     
@@ -53,12 +78,12 @@ class CustomImageDataset(Dataset):
                 # 1. class#image.jpg
                 # 2. mnist_train_XXXXX_label_Y.jpg
                 if 'label_' in filename:
-                    # MNIST format: extract the label after 'label_'
-                    parts = filename.split('label_')
-                    if len(parts) > 1:
-                        # Extract next char after label_
-                        class_name = parts[-1][0]
+                    try:
+                        # Extract the full numerical label after 'label_'
+                        class_name = filename.split('_label_')[1].split('.')[0]
                         image_files.append((file_path, class_name))
+                    except Exception:
+                        logger.warning(f"Could not extract label from {filename}, skipping")
                 elif '#' in filename:
                     # Original format: class#image.jpg
                     class_name = filename.split('#')[0]
@@ -90,11 +115,11 @@ class CustomImageDataset(Dataset):
         
         # Load image
         try:
-            image = Image.open(image_path).convert('RGB')
+            image = Image.open(image_path).convert('L')
         except Exception as e:
             logger.error(f"Error loading image {image_path}: {e}")
             # Return a black image as fallback
-            image = Image.new('RGB', (224, 224), (0, 0, 0))
+            image = Image.new('L', (28, 28), 0)
         
         # Apply transform if provided
         if self.transform:
@@ -112,24 +137,10 @@ def get_device() -> torch.device:
 
 def get_model(num_classes: int, device: torch.device, pretrained: bool = True) -> torch.nn.Module:
     """
-    Get a MobileNetV2 model with the specified number of output classes.
-    
-    Args:
-        num_classes: Number of output classes
-        device: Device to move the model to
-        pretrained: Whether to use pretrained weights
-        
-    Returns:
-        Initialized MobileNetV2 model
+    Get a MediumCNN model with the specified number of output classes.
     """
-    from torchvision import models
-    
-    logger.info(f"Creating MobileNetV2 model with {num_classes} classes (pretrained={pretrained})")
-    model = models.mobilenet_v2(pretrained=pretrained)
-    
-    # Replace the last fully connected layer
-    in_features = model.classifier[1].in_features
-    model.classifier[1] = nn.Linear(in_features, num_classes)
+    logger.info(f"Creating MediumCNN model with {num_classes} classes")
+    model = MediumCNN(num_classes=num_classes)
     
     # Move model to device
     model = model.to(device)
@@ -141,7 +152,7 @@ def get_model(num_classes: int, device: torch.device, pretrained: bool = True) -
 def create_data_loaders(
     data_dir: Union[str, Path],
     batch_size: int = 32,
-    img_size: int = 224,
+    img_size: int = 28,
     num_workers: int = 2
 ) -> Tuple[DataLoader, Dict[str, int]]:
     """
@@ -162,7 +173,7 @@ def create_data_loaders(
     transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize((0.1307,), (0.3081,))
     ])
     
     # Create custom dataset

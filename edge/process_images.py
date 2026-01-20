@@ -87,11 +87,11 @@ class WebSocketTrainer:
                 # 1. class#image.jpg
                 # 2. mnist_train_XXXXX_label_Y.jpg
                 if 'label_' in filename:
-                    # MNIST format: extract the char after 'label_'
-                    parts = filename.split('label_')
-                    if len(parts) > 1:
-                        label = parts[-1][0]
+                    try:
+                        label = filename.split('_label_')[1].split('.')[0]
                         classes.add(label)
+                    except Exception:
+                        logger.warning(f"Could not extract label from {filename}, skipping")
                 elif '#' in filename:
                     # Original format: class#image.jpg
                     class_name = filename.split('#')[0]
