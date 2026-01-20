@@ -31,27 +31,24 @@ func get_data(root string) (int, []string, error) {
 	}
 
 	// Sort files to ensure deterministic and stratified distribution
-	// Because files are named "Class#...", sorting them groups them by class.
-	// Round-robin distribution on this sorted list ensures each worker gets a balanced mix.
 	sort.Strings(files)
 
 	return len(files), files, nil
 }
 
 func get_img_data(file_path string) ([]byte, error) {
-
 	f, err := os.Open(file_path)
 	if err != nil {
-		log.Fatal("Errror at get img data", err) //handle diff during production
+		log.Printf("Error at get img data: %v", err)
+		return nil, err
 	}
+	defer f.Close()
 
 	b := bytes.Buffer{}
 	_, err = io.Copy(&b, f)
 	if err != nil {
-		log.Fatal("Errror at get img data", err) //handle diff during production
+		return nil, err
 	}
-
-	f.Close()
 
 	return b.Bytes(), nil
 }

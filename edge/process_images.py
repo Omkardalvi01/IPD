@@ -148,11 +148,11 @@ class WebSocketTrainer:
         try:
             # Update hyperparameters if provided
             if hyperparams:
-                if 'batch_size' in hyperparams:
+                if hyperparams.get('batch_size') is not None:
                     self.batch_size = int(hyperparams['batch_size'])
-                if 'learning_rate' in hyperparams:
+                if hyperparams.get('learning_rate') is not None:
                     self.learning_rate = float(hyperparams['learning_rate'])
-                if 'epochs' in hyperparams:
+                if hyperparams.get('epochs') is not None:
                     self.num_epochs = int(hyperparams['epochs'])
                 
                 logger.info(f"Using hyperparams: Batch={self.batch_size}, LR={self.learning_rate}, Epochs={self.num_epochs}")
@@ -417,13 +417,12 @@ async def handle_client(websocket, path=None):
                     data_dir = data.get('data_dir', '').strip()
                     edge_id = data.get('edge_id', '').strip()
                     
-                    # Extract hyperparameters
-                    hyperparams = {
-                        'batch_size': data.get('batch_size'),
-                        'learning_rate': data.get('learning_rate'),
-                        'epochs': data.get('epochs'),
-                        'model_path': data.get('model_path')
-                    }
+                    # Extract hyperparameters safely
+                    hyperparams = {}
+                    for key in ['batch_size', 'learning_rate', 'epochs', 'model_path']:
+                        val = data.get(key)
+                        if val is not None:
+                            hyperparams[key] = val
                     
                 except json.JSONDecodeError:
                     # Fallback: treat as plain text directory path
