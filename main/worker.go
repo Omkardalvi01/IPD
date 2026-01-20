@@ -3,11 +3,13 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Omkardalvi01/IPD/networking"
 	"github.com/pion/webrtc/v3"
@@ -16,36 +18,41 @@ import (
 type result_state int
 
 const (
-	SUCCESS result_state = 0
-	FAILURE result_state = -1
-	END string = "EOF"
+	SUCCESS        result_state = 0
+	FAILURE        result_state = -1
+	MODEL_RECEIVED result_state = 1
+	END            string       = "EOF"
 )
 
-type Result struct{
+type Result struct {
 	worker_id int
 	result    result_state
 }
 
-type Request struct{
-	f string
+type Request struct {
+	f            string
+	remote_name  string
+	is_params    bool
+	params       string
+	is_trigger   bool
+	round_folder string
 }
 
-type Worker struct{
-	req_chan chan Request
-	res_chan chan<- Result
-	conn_id string
-	worker_id int
-	current int
-	weight int
+type Worker struct {
+	req_chan      chan Request
+	res_chan      chan<- Result
+	conn_id       string
+	worker_id     int
+	current       int
+	weight        int
+	outputDirBase string
 }
 
-func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
+func (w *Worker) start(wg1, wg2 *sync.WaitGroup, total_files int) {
 	defer wg2.Done()
 
-	stop_worker := make(chan struct{})
-
-	peer ,dc , err := networking.Peerconnection(w.conn_id)
-	if err != nil{
+	peer, dc, err := networking.Peerconnection(w.conn_id)
+	if err != nil {
 		log.Printf("Error with peer connection in worker %d", w.worker_id)
 		return
 	}
@@ -54,12 +61,17 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 
 	wg1.Done()
 
+	done := make(chan struct{})
+
+	// Default output directory
+	w.outputDirBase = "./outputs"
+
 	dc.OnOpen(func() {
-		fmt.Println("Data channel Open")
+		fmt.Printf("Worker %d: Data channel Open\n", w.worker_id)
 
 		weight := (w.weight * total_files) / 100
 
-		// Convert to bytes (big-endian uint32, safe for larger numbers)
+		// Send weight as metadata
 		buf := make([]byte, 4)
 		binary.BigEndian.PutUint32(buf, uint32(weight))
 		dc.Send(buf)
@@ -69,47 +81,92 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 		dc.SendText(perc_msg)
 
 		for r := range w.req_chan {
-
-			f, err := os.Open(r.f)
-			if err != nil{
-				log.Print("Error while opening file ",err)
+			if r.is_params {
+				if r.round_folder != "" {
+					w.outputDirBase = filepath.Join("./outputs", r.round_folder)
+					if err := os.MkdirAll(w.outputDirBase, 0755); err != nil {
+						log.Printf("Worker %d: Error creating round folder %s: %v", w.worker_id, w.outputDirBase, err)
+					} else {
+						log.Printf("Worker %d: Output directory updated to: %s", w.worker_id, w.outputDirBase)
+					}
+				}
+				// Send hyperparameters
+				dc.SendText("HYPERPARAMS:" + r.params)
+				continue
 			}
 
-			file_name := strings.Join(strings.Split(f.Name(), "/")[1:], "/")
-			send_file_name := strings.ReplaceAll(file_name, "/", "#")
-			dc.SendText(send_file_name)
-
-			img, err := get_img_data(f.Name())
-			if err != nil {
-				log.Fatal("Error while get image data", err)
+			if r.is_trigger {
+				log.Printf("Worker %d: Sending BATCH_ENDED signal", w.worker_id)
+				dc.SendText("BATCH_ENDED")
+				continue
 			}
 
-			err = dc.Send(img)
-			if err != nil {
-				log.Fatal("Error while sending image data", err)
+			if r.f != "" {
+				f, err := os.Open(r.f)
+				if err != nil {
+					log.Printf("Worker %d: Error opening file %s: %v", w.worker_id, r.f, err)
+					continue
+				}
+
+				var send_file_name string
+				if r.remote_name != "" {
+					send_file_name = r.remote_name
+				} else {
+					// Default logic for data files: preserve some path info using '#'
+					parts := strings.Split(f.Name(), "/")
+					var file_name string
+					if len(parts) > 1 {
+						file_name = strings.Join(parts[1:], "/")
+					} else {
+						file_name = filepath.Base(f.Name())
+					}
+					send_file_name = strings.ReplaceAll(file_name, "/", "#")
+				}
+
+				dc.SendText(send_file_name)
+				log.Printf("Worker %d: Sending file: %s (Source: %s)", w.worker_id, send_file_name, r.f)
+
+				// Send in 16KB chunks
+				const chunkSize = 16 * 1024
+				buffer := make([]byte, chunkSize)
+				chunkCount := 0
+				startTime := time.Now()
+
+				for {
+					n, err := f.Read(buffer)
+					if err != nil {
+						if err == io.EOF {
+							break
+						}
+						log.Printf("Worker %d: Error reading %s: %v", w.worker_id, send_file_name, err)
+						break
+					}
+
+					if err := dc.Send(buffer[:n]); err != nil {
+						log.Printf("Worker %d: Error sending chunk %d for %s: %v", w.worker_id, chunkCount, send_file_name, err)
+						break
+					}
+					chunkCount++
+					if chunkCount%50 == 0 {
+						log.Printf("Worker %d: Sent %d chunks for %s...", w.worker_id, chunkCount, send_file_name)
+					}
+				}
+
+				dc.SendText(END)
+				f.Close()
+				log.Printf("Worker %d: Finished sending %s (%d chunks) in %v", w.worker_id, send_file_name, chunkCount, time.Since(startTime))
+
+				w.res_chan <- Result{worker_id: w.worker_id, result: SUCCESS}
 			}
-
-			dc.SendText(END)
-
-			w.res_chan <- Result{worker_id: w.worker_id, result: SUCCESS}
-
-			f.Close()
 		}
-		// Signal that all files for this batch have been sent
-		dc.SendText("BATCH_ENDED")
+		close(done)
 	})
-	// Create output directory if it doesn't exist
-	outputDir := "./outputs"
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		log.Printf("Failed to create output directory: %v", err)
-	} else {
-		log.Printf("Output directory ready: %s", outputDir)
-	}
 
 	var (
 		currentFile     *os.File
 		currentFileName string
 		totalReceived   int64
+		receiveChunks   int64
 	)
 
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -117,84 +174,64 @@ func (w Worker) start(wg1, wg2 *sync.WaitGroup, total_files int){
 			msgText := string(msg.Data)
 			switch {
 			case strings.HasPrefix(msgText, "DHAK-DHAK"):
-				// This is a heartbeat message
-				log.Printf("Heartbeat received: %s", msgText)
+				// log.Printf("Worker %d: Heartbeat received", w.worker_id)
 
 			case strings.HasPrefix(msgText, "FILE:"):
-				// Start of a new file
 				if currentFile != nil {
-					log.Printf("Warning: Previous file %s not properly closed", currentFileName)
 					currentFile.Close()
-					currentFile = nil
 				}
 
 				currentFileName = strings.TrimPrefix(msgText, "FILE:")
-				filePath := filepath.Join(outputDir, currentFileName)
+				filePath := filepath.Join(w.outputDirBase, currentFileName)
 
-				log.Printf("Starting to receive file: %s", currentFileName)
+				log.Printf("Worker %d: Starting to receive file: %s (Target: %s)", w.worker_id, currentFileName, filePath)
 
 				var err error
 				currentFile, err = os.Create(filePath)
 				if err != nil {
-					log.Printf("Error creating file %s: %v", filePath, err)
+					log.Printf("Worker %d: Error creating file %s: %v", w.worker_id, filePath, err)
 					return
 				}
 				totalReceived = 0
-				log.Printf("Ready to receive data for file: %s", filePath)
+				receiveChunks = 0
 
 			case strings.HasPrefix(msgText, "FILE_END:"):
-				// End of file
-				expectedFile := strings.TrimPrefix(msgText, "FILE_END:")
 				if currentFile != nil {
-					if currentFileName != expectedFile {
-						log.Printf("Warning: File end marker mismatch. Expected %s, got %s", currentFileName, expectedFile)
-					}
-					err := currentFile.Sync() // Ensure all data is written to disk
-					if err != nil {
-						log.Printf("Error syncing file %s: %v", currentFileName, err)
-					}
+					currentFile.Sync()
 					currentFile.Close()
-					log.Printf("Successfully received file: %s (%d bytes)", currentFileName, totalReceived)
+					log.Printf("Worker %d: Successfully received file: %s (%d bytes, %d chunks)", w.worker_id, currentFileName, totalReceived, receiveChunks)
 					currentFile = nil
-					totalReceived = 0
-					stop_worker <- struct{}{}
-				} else {
-					log.Printf("Received FILE_END but no file is currently being received")
+
+					w.res_chan <- Result{worker_id: w.worker_id, result: MODEL_RECEIVED}
 				}
 
 			default:
-				log.Printf("Received message: %s", msgText)
+				log.Printf("Worker %d Received message: %s", w.worker_id, msgText)
 			}
 		} else {
-			// Handle binary data (file chunks)
 			if currentFile != nil {
 				n, err := currentFile.Write(msg.Data)
 				if err != nil {
-					log.Printf("Error writing to file: %v", err)
-					currentFile.Close()
-					currentFile = nil
+					log.Printf("Worker %d: Error writing chunk: %v", w.worker_id, err)
 					return
 				}
 				totalReceived += int64(n)
-				if totalReceived%(1024*1024) == 0 { // Log every 1MB
-					log.Printf("Received %d bytes for %s", totalReceived, currentFileName)
+				receiveChunks++
+				if receiveChunks%50 == 0 {
+					log.Printf("Worker %d: Received %d chunks for %s...", w.worker_id, receiveChunks, currentFileName)
 				}
-			} else {
-				log.Printf("Received unexpected binary data without FILE: prefix, size: %d bytes", len(msg.Data))
 			}
 		}
 	})
 
-	// Clean up on connection close
 	dc.OnClose(func() {
-		log.Printf("Data channel closed")
+		log.Printf("Worker %d: Data channel closed", w.worker_id)
 		if currentFile != nil {
 			currentFile.Close()
-			currentFile = nil
 		}
 	})
 
-	<-stop_worker
+	<-done
 }
 
 type Workerpool struct {
@@ -228,5 +265,4 @@ func (wp *Workerpool) pickWorker() *Worker {
 
 	best.current -= total
 	return best
-
 }

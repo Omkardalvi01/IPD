@@ -7,3 +7,4 @@ edge/venv/
 edge/*.txt
 main/*.txt
 main/*/
+mnist_jpg/*/

@@ -134,17 +134,29 @@ class WebSocketTrainer:
         valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
         return any(filename.lower().endswith(ext) for ext in valid_extensions)
     
-    async def train_on_images(self, data_dir: str) -> Dict[str, Any]:
+    async def train_on_images(self, data_dir: str, hyperparams: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Perform training session on images in the given directory.
         
         Args:
             data_dir: Path to directory containing images
+            hyperparams: Optional dictionary of hyperparameters (epochs, batch_size, lr, model_path)
             
         Returns:
             Dict containing training results and output file path
         """
         try:
+            # Update hyperparameters if provided
+            if hyperparams:
+                if 'batch_size' in hyperparams:
+                    self.batch_size = int(hyperparams['batch_size'])
+                if 'learning_rate' in hyperparams:
+                    self.learning_rate = float(hyperparams['learning_rate'])
+                if 'epochs' in hyperparams:
+                    self.num_epochs = int(hyperparams['epochs'])
+                
+                logger.info(f"Using hyperparams: Batch={self.batch_size}, LR={self.learning_rate}, Epochs={self.num_epochs}")
+
             logger.info(f"Starting training session on directory: {data_dir}")
             data_path = Path(data_dir)
             
@@ -177,9 +189,45 @@ class WebSocketTrainer:
                 
             logger.info(f"Discovered {len(self.class_to_idx)} classes: {list(self.class_to_idx.keys())}")
             
-            # Create fresh model with the correct number of classes
+            # Initialize model
             num_classes = len(self.class_to_idx)
             self.model = get_model(num_classes, self.device)
+            
+            # Load initial weights if provided
+            if hyperparams and 'model_path' in hyperparams and hyperparams['model_path']:
+                model_path = hyperparams['model_path']
+                if os.path.exists(model_path):
+                    logger.info(f"Loading initial weights from {model_path}")
+                    try:
+                        checkpoint = torch.load(model_path, map_location=self.device)
+                        
+                        # Handle different checkpoint formats
+                        if isinstance(checkpoint, dict):
+                            if 'model_state_dict' in checkpoint:
+                                state_dict = checkpoint['model_state_dict']
+                            elif 'state_dict' in checkpoint:
+                                state_dict = checkpoint['state_dict']
+                            else:
+                                state_dict = checkpoint
+                        else:
+                            state_dict = checkpoint
+                            
+                        # Handle architecture mismatches (e.g. classifier layer)
+                        model_dict = self.model.state_dict()
+                        
+                        # Filter out unnecessary keys or mismatched shapes
+                        pretrained_dict = {k: v for k, v in state_dict.items() 
+                                         if k in model_dict and v.shape == model_dict[k].shape}
+                        
+                        logger.info(f"Loading {len(pretrained_dict)}/{len(model_dict)} layers from checkpoint")
+                        model_dict.update(pretrained_dict)
+                        self.model.load_state_dict(model_dict)
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to load initial weights: {e}")
+                else:
+                    logger.warning(f"Initial model path provided but not found: {model_path}")
+
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
             self.training_epoch = 0
             
@@ -226,14 +274,13 @@ class WebSocketTrainer:
                         epoch_loss += loss.item()
                         epoch_batches += 1
                         total_loss += loss.item()
-                        total_loss += loss.item()
                         num_batches += 1
                         
-                        # Yield control to event loop to keep WebSocket connection alive
+                        # Yield control to event loop
                         if batch_idx % 5 == 0:
                             await asyncio.sleep(0)
                         
-                        if batch_idx % 10 == 0:  # Log every 10 batches
+                        if batch_idx % 10 == 0:
                             logger.info(f"Epoch {epoch + 1}, Batch {batch_idx}: Loss = {loss.item():.4f}")
                         
                     except Exception as e:
@@ -369,10 +416,20 @@ async def handle_client(websocket, path=None):
                     data = json.loads(message)
                     data_dir = data.get('data_dir', '').strip()
                     edge_id = data.get('edge_id', '').strip()
+                    
+                    # Extract hyperparameters
+                    hyperparams = {
+                        'batch_size': data.get('batch_size'),
+                        'learning_rate': data.get('learning_rate'),
+                        'epochs': data.get('epochs'),
+                        'model_path': data.get('model_path')
+                    }
+                    
                 except json.JSONDecodeError:
                     # Fallback: treat as plain text directory path
                     data_dir = message.strip()
                     edge_id = None
+                    hyperparams = None
                 
                 logger.info(f"Received directory path: {data_dir}, edge_id: {edge_id}")
                 
@@ -399,7 +456,7 @@ async def handle_client(websocket, path=None):
                 
                 # Perform training
                 logger.info(f"Starting training on directory: {data_dir}")
-                result = await trainer.train_on_images(data_dir)
+                result = await trainer.train_on_images(data_dir, hyperparams)
                 
                 # Add edge_id to the result
                 result["edge_id"] = os.environ.get('EDGE_ID')

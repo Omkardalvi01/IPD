@@ -28,10 +28,7 @@ type allocation struct {
 	Uids map[string]int `json:"allocation"`
 }
 
-type aggregator struct {
-	NumEdges      int            `json:"numEdges"`
-	UIDandPercent map[string]int `json:"file_and_weight"`
-}
+
 
 var (
 	ALGO_TEST_LINK = "ws://localhost:13000/join"
@@ -48,14 +45,36 @@ func main() {
 
 	// Parse flags
 	useSplit := false
-	for _, arg := range os.Args[1:] {
+	numRounds := 3
+	numEpochs := 1
+	batchSize := 32
+	learningRate := 0.001
+
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "-split" {
 			useSplit = true
+		} else if arg == "-rounds" && i+1 < len(args) {
+			fmt.Sscanf(args[i+1], "%d", &numRounds)
+			i++
+		} else if arg == "-epochs" && i+1 < len(args) {
+			fmt.Sscanf(args[i+1], "%d", &numEpochs)
+			i++
+		} else if arg == "-batch" && i+1 < len(args) {
+			fmt.Sscanf(args[i+1], "%d", &batchSize)
+			i++
+		} else if arg == "-lr" && i+1 < len(args) {
+			fmt.Sscanf(args[i+1], "%f", &learningRate)
+			i++
 		}
 	}
 
+	fmt.Printf("Configuration: Rounds=%d, Epochs=%d, Batch=%d, LR=%f\n", numRounds, numEpochs, batchSize, learningRate)
+
 	// Set up directory
-	dir := "./mnist_600"
+	// dir := "/home/mihir/Desktop/IPD/IPD-F/mnist_jpg"
+	dir:= "mnist_600"
 
 	// Locate DataPreprocessor.py
 	preprocessorScript := "DataPreprocessor.py"
@@ -167,131 +186,182 @@ func main() {
 	}
 
 	// Initialize worker pool
-	resultchan := make(chan Result, n)
+	// Use a large buffer for resultchan to avoid blocking
+	resultchan := make(chan Result, n + numWorkers*numRounds*2) 
 	wp := Workerpool{resultchan: resultchan}
 	wp.start_pool(numWorkers, n, edge_id, allocate.Uids, &edge_connection, &worker_done)
-
-	// Start result processor
-	go func() {
-		for i := 1; i <= n; i++ {
-			result := <-resultchan
-			fmt.Printf("worker: %d status: %v uploaded: %d/%d\n", result.worker_id, result.result, i, n)
-		}
-		close(resultchan)
-	}()
 
 	// Wait for workers to connect
 	edge_connection.Wait()
 
-	// Distribute files to workers
-	for _, file_path := range files {
-		worker := wp.pickWorker()
-		worker.req_chan <- Request{f: file_path}
-	}
+	globalModelPath := "" // Will be updated after each round
 
-	// Close worker channels
+	// ==========================================
+	// FEDERATED LEARNING LOOP
+	// ==========================================
+	// Create a unique timestamp for this training session
+	overallStartTime := time.Now().Format("20060102_150405")
+
+	for round := 0; round < numRounds; round++ {
+		roundFolder := fmt.Sprintf("%s_round_%d", overallStartTime, round+1)
+		fmt.Printf("\n==================================================\n")
+		fmt.Printf("STARTING FEDERATED ROUND %d / %d\n", round+1, numRounds)
+		fmt.Printf("Subdirectory: %s\n", roundFolder)
+		fmt.Printf("==================================================\n")
+
+		// 1. Send Hyperparameters and Round Folder
+		params_map := map[string]interface{}{
+			"epochs":        numEpochs,
+			"batch_size":    batchSize,
+			"learning_rate": learningRate,
+		}
+		
+		if globalModelPath != "" {
+			params_map["model_path"] = filepath.Base(globalModelPath)
+		}
+
+		paramsJson, _ := json.Marshal(params_map)
+		paramsStr := string(paramsJson)
+
+		// Broadcast params and folder to all workers
+		for i := 0; i < numWorkers; i++ {
+			wp.workers[i].req_chan <- Request{
+				is_params:    true, 
+				params:       paramsStr,
+				round_folder: roundFolder,
+			}
+		}
+
+		// 2. Distribute Data (Round 0 only)
+		filesSent := 0
+		if round == 0 {
+			fmt.Printf("Distributing %d data files...\n", len(files))
+			for _, file_path := range files {
+				worker := wp.pickWorker()
+				worker.req_chan <- Request{f: file_path}
+				filesSent++
+			}
+		} else {
+			fmt.Printf("Skipping data distribution (already done in Round 1)\n")
+		}
+
+		// 3. Distribute Global Model (Round > 0)
+		if round > 0 && globalModelPath != "" {
+			fmt.Printf("Distributing global model: %s\n", globalModelPath)
+			// Broadcast model to ALL workers
+			modelFilename := filepath.Base(globalModelPath)
+			for i := 0; i < numWorkers; i++ {
+				wp.workers[i].req_chan <- Request{
+					f:           globalModelPath,
+					remote_name: modelFilename,
+				}
+				filesSent++ // Track this as a file sent, so we expect a SUCCESS result
+			}
+		}
+
+		// 4. Trigger Training
+		fmt.Printf("Triggering training on all %d workers...\n", numWorkers)
+		for i := 0; i < numWorkers; i++ {
+			wp.workers[i].req_chan <- Request{is_trigger: true}
+		}
+
+		// 5. Wait for Completion
+		modelsReceived := 0
+		uploadsCompleted := 0
+		
+		fmt.Printf("Waiting for results... (Expect %d uploads, %d models)\n", filesSent, numWorkers)
+		
+		for modelsReceived < numWorkers {
+			result := <-resultchan
+			switch result.result {
+			case SUCCESS:
+				uploadsCompleted++
+				if uploadsCompleted % 100 == 0 || uploadsCompleted == filesSent {
+					fmt.Printf("  [Round %d] Upload progress: %d/%d\n", round+1, uploadsCompleted, filesSent)
+				}
+			case MODEL_RECEIVED:
+				modelsReceived++
+				fmt.Printf("  [Round %d] Worker %d finished training and returned model (%d/%d)\n", round+1, result.worker_id, modelsReceived, numWorkers)
+			}
+		}
+
+		fmt.Printf("Round %d training completed. Aggregating results...\n", round+1)
+		
+		// 6. Aggregation
+		// Prepare and send aggregation data to the API server
+		edgeIDs := make([]string, 0, len(allocate.Uids))
+		for id := range allocate.Uids {
+			edgeIDs = append(edgeIDs, id)
+		}
+
+		requestData := map[string]interface{}{
+			"uids": edgeIDs,
+		}
+		
+		jsonData, err := json.Marshal(requestData)
+		if err != nil {
+			log.Fatalf("Error marshaling aggregation request: %v", err)
+		}
+
+		apiURL := "http://localhost:8000/receive_uids"
+		resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonData))
+		if err != nil {
+			log.Printf("Error posting to aggregator: %v", err)
+			continue
+		}
+		
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		
+		var aggResult map[string]interface{}
+		json.Unmarshal(body, &aggResult)
+		
+		if resp.StatusCode == http.StatusOK {
+			if modelPath, ok := aggResult["model_path"].(string); ok {
+				fmt.Printf("New Global Model: %s\n", modelPath)
+				globalModelPath = modelPath
+				
+				// 7. Evaluation
+				if true { // Evaluate every round
+					testDir := filepath.Join(dir, "test")
+					fmt.Printf("Evaluating model on %s...\n", testDir)
+					
+					// Locate evaluate.py logic (reused)
+					evalScript := "evaluate.py"
+					if _, err := os.Stat(evalScript); os.IsNotExist(err) {
+						if _, err := os.Stat("main/" + evalScript); err == nil {
+							evalScript = "main/" + evalScript
+						}
+					}
+					
+					cmdArgs := []string{evalScript, 
+						"--model-path", modelPath, 
+						"--data-dir", testDir,
+					}
+					
+					if numClients, ok := aggResult["num_clients"].(float64); ok {
+						cmdArgs = append(cmdArgs, "--num-clients", fmt.Sprintf("%.0f", numClients))
+					}
+
+					evalCmd := exec.Command("python3", cmdArgs...)
+					evalCmd.Stdout = os.Stdout
+					evalCmd.Stderr = os.Stderr
+					evalCmd.Run() // Ignore error, just run
+				}
+			}
+		} else {
+			log.Printf("Aggregation failed: %v", aggResult)
+		}
+	} // End of Round Loop
+
+	// Close worker channels to shut them down
+	fmt.Println("Training complete. Shutting down workers...")
 	for i := 0; i < numWorkers; i++ {
 		close(wp.workers[i].req_chan)
 	}
 
 	// Wait for all workers to finish
 	worker_done.Wait()
-
-	// Prepare and send aggregation data to the API server
-	// First, get the list of edge IDs that participated in this round
-	edgeIDs := make([]string, 0, len(allocate.Uids))
-	for id := range allocate.Uids {
-		edgeIDs = append(edgeIDs, id)
-	}
-
-	// Prepare the request payload with UIDs
-	requestData := map[string]interface{}{
-		"uids": edgeIDs,
-	}
-
-	// Convert to JSON
-	jsonData, err := json.Marshal(requestData)
-	if err != nil {
-		log.Fatal("Error while converting to JSON: ", err)
-	}
-
-	// Make the HTTP POST request to the aggregator API
-	apiURL := "http://localhost:8000/receive_uids"
-	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Fatal("Error while posting to aggregator API: ", err)
-	}
-	defer resp.Body.Close()
-
-	// Read and parse the response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal("Error reading response body: ", err)
-	}
-
-	// Parse the JSON response
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		log.Fatal("Error parsing response: ", err)
-	}
-
-	// Log the response
-	fmt.Printf("\n=== Aggregation Results ===\n")
-	fmt.Printf("Status: %s\n", resp.Status)
-	fmt.Printf("Message: %v\n", result["message"])
-
-	// If successful, show model location and TRIGGER EVALUATION
-	if resp.StatusCode == http.StatusOK {
-		if modelPath, ok := result["model_path"].(string); ok {
-			fmt.Printf("Global model saved at: %s\n", modelPath)
-
-			// Trigger Evaluation
-			testDir := filepath.Join(dir, "test")
-			fmt.Printf("\n=== Starting Evaluation on %s ===\n", testDir)
-			
-			// Locate evaluate.py
-			evalScript := "evaluate.py"
-			if _, err := os.Stat(evalScript); os.IsNotExist(err) {
-				if _, err := os.Stat("main/" + evalScript); err == nil {
-					evalScript = "main/" + evalScript
-				} else {
-					log.Printf("Warning: evaluate.py not found in . or main/")
-				}
-			}
-
-			// Construct evaluation command
-			cmdArgs := []string{evalScript, 
-				"--model-path", modelPath, 
-				"--data-dir", testDir,
-			}
-			
-			if numClients, ok := result["num_clients"].(float64); ok {
-				cmdArgs = append(cmdArgs, "--num-clients", fmt.Sprintf("%.0f", numClients))
-			}
-
-			evalCmd := exec.Command("python3", cmdArgs...)
-			
-			// Capture output
-			evalCmd.Stdout = os.Stdout
-			evalCmd.Stderr = os.Stderr
-			
-			startTime := time.Now()
-			if err := evalCmd.Run(); err != nil {
-				log.Printf("Evaluation failed: %v", err)
-			} else {
-				duration := time.Since(startTime)
-				fmt.Printf("\n=== Evaluation Completed Successfully in %v ===\n", duration)
-			}
-		}
-		if numClients, ok := result["num_clients"].(float64); ok {
-			fmt.Printf("Number of clients aggregated: %.0f\n", numClients)
-		}
-	} else {
-		// Show error details if the request failed
-		fmt.Printf("Error details: %v\n", result)
-	}
-
-	// Wait for interrupt signal
 	<-signalChan
 	log.Println("Shutting down...")
 

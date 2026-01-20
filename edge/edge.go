@@ -21,10 +21,7 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-var (
-	fileTransferMutex sync.Mutex
-	activeTransfers   = make(map[string]bool)
-)
+
 
 const (
 	Role string = "E"
@@ -37,7 +34,7 @@ func id_maker() string {
 }
 
 const (
-	ALGO_TEST_LINK	 = "ws://localhost:13000/join"
+	ALGO_TEST_LINK = "ws://localhost:13000/join"
 	ALGO_LIVE_LINK = "wss://ipd-allocator-1.onrender.com/ws"
 	ML_MODEL       = "ws://localhost:8765"
 )
@@ -65,8 +62,8 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	log.Printf("Sending file metadata - Name: %s, Size: %d bytes", fileName, fileInfo.Size())
 
 	// Send file marker and name - use the actual filename from Python output
-	//dont delete the sendfile variable
-	sendfilename := fmt.Sprintf("%s.txt", uid)
+	// Use .pth for model weights
+	sendfilename := fmt.Sprintf("%s.pth", uid)
 	err = dc.SendText("FILE:" + sendfilename)
 
 	if err != nil {
@@ -80,6 +77,7 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	// Send file data in chunks
 	buffer := make([]byte, 16*1024) // Smaller chunks for better reliability
 	totalSent := 0
+	chunkCount := 0
 	for {
 		n, err := file.Read(buffer)
 		if err != nil && err != io.EOF {
@@ -96,7 +94,10 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 			return fmt.Errorf("error sending file data: %v", sendErr)
 		}
 		totalSent += n
-		log.Printf("Sent %d/%d bytes (%.1f%%)", totalSent, fileInfo.Size(), float64(totalSent)/float64(fileInfo.Size())*100)
+		chunkCount++
+		if chunkCount%50 == 0 || totalSent == int(fileInfo.Size()) {
+			log.Printf("Sent %d/%d bytes (%.1f%%) - %d chunks", totalSent, fileInfo.Size(), float64(totalSent)/float64(fileInfo.Size())*100, chunkCount)
+		}
 	}
 
 	// Send end of file marker
@@ -106,11 +107,12 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 		return fmt.Errorf("failed to send file end marker: %v", err)
 	}
 
-	log.Printf("Successfully sent file: %s (%d bytes)", fileName, totalSent)
+	log.Printf("Successfully sent file: %s (%d bytes, %d chunks)", fileName, totalSent, chunkCount)
 	return nil
 }
 
-func triggerPythonScript(dirName, edgeID string, percentage int, dc *webrtc.DataChannel) error {
+
+func triggerPythonScript(dirName, edgeID string, percentage int, hyperparams map[string]interface{}, dc *webrtc.DataChannel) error {
 	// Convert relative directory name to absolute path
 	absPath, err := filepath.Abs(dirName)
 	if err != nil {
@@ -131,6 +133,26 @@ func triggerPythonScript(dirName, edgeID string, percentage int, dc *webrtc.Data
 		"data_dir":   absPath,
 		"edge_id":    edgeID,
 		"percentage": percentage,
+	}
+
+	// Merge hyperparameters if present
+	for k, v := range hyperparams {
+		// Special handling for model_path: make it absolute if it's in the data dir
+		if k == "model_path" {
+			if pathStr, ok := v.(string); ok && pathStr != "" {
+				// Check if file exists in data dir (transferred global model)
+				localModelPath := filepath.Join(absPath, pathStr)
+				if _, err := os.Stat(localModelPath); err == nil {
+					message[k] = localModelPath
+					log.Printf("Resolved absolute model path: %s", localModelPath)
+				} else {
+					// Fallback to original value (maybe absolute path on Edge device?)
+					message[k] = v
+				}
+			}
+		} else {
+			message[k] = v
+		}
 	}
 
 	jsonMessage, err := json.Marshal(message)
@@ -327,14 +349,17 @@ func main() {
 	}
 
 	var (
-		totalFiles    int
-		receivedFiles int
+		totalFiles          int
+		receivedFiles       int
 		allocatedPercentage int
-		filesMutex    sync.Mutex
+		filesMutex          sync.Mutex
+		hyperparams         map[string]interface{}
 	)
 
 	var file_name string
 	var f *os.File
+	var totalBytesReceived int64
+	var rxChunkCount int
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		fmt.Printf("New DataChannel %s\n", dc.Label())
 
@@ -362,11 +387,26 @@ func main() {
 				} else if msgText == "BATCH_ENDED" {
 					log.Printf("Received BATCH_ENDED signal. All files received. Triggering ML training...")
 					go func() {
-						err := triggerPythonScript(dir_name, edge_id, allocatedPercentage, dc)
+						filesMutex.Lock()
+						params := hyperparams
+						filesMutex.Unlock()
+
+						err := triggerPythonScript(dir_name, edge_id, allocatedPercentage, params, dc)
 						if err != nil {
 							log.Printf("Error triggering Python script: %v", err)
 						}
 					}()
+				} else if strings.HasPrefix(msgText, "HYPERPARAMS:") {
+					jsonStr := strings.TrimPrefix(msgText, "HYPERPARAMS:")
+					var params map[string]interface{}
+					if err := json.Unmarshal([]byte(jsonStr), &params); err != nil {
+						log.Printf("Error parsing HYPERPARAMS: %v", err)
+					} else {
+						filesMutex.Lock()
+						hyperparams = params
+						filesMutex.Unlock()
+						log.Printf("Received hyperparameters: %+v", params)
+					}
 				} else if strings.HasPrefix(msgText, "WEIGHT_PERCENTAGE:") {
 					// Parse allocation percentage
 					percStr := strings.TrimPrefix(msgText, "WEIGHT_PERCENTAGE:")
@@ -382,7 +422,9 @@ func main() {
 				} else {
 					file_name = msgText
 					file_path := filepath.Join(dir_name, file_name)
-					log.Printf("Starting to receive file %d: %s", totalFiles, file_name)
+					log.Printf("Starting to receive file: %s", file_name)
+					totalBytesReceived = 0
+					rxChunkCount = 0
 					f, err = os.Create(file_path)
 					if err != nil {
 						log.Fatal("Error while creating file", err)
@@ -400,9 +442,14 @@ func main() {
 					log.Printf("Updated totalFiles to %d", totalFiles)
 				} else {
 					if f != nil {
-						_, err = io.Copy(f, bytes.NewBuffer(msg.Data))
+						n, err := io.Copy(f, bytes.NewBuffer(msg.Data))
 						if err != nil {
 							log.Fatal("Error while copying file", err)
+						}
+						totalBytesReceived += n
+						rxChunkCount++
+						if rxChunkCount % 50 == 0 {
+							log.Printf("Received %d chunks (%d bytes) for %s", rxChunkCount, totalBytesReceived, file_name)
 						}
 					}
 				}
