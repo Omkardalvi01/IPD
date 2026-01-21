@@ -1,11 +1,9 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader, Subset
-from torchvision import transforms
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms, models
 from PIL import Image
 from typing import Optional, Dict, List, Any, Union
-from sklearn.model_selection import train_test_split
 import os
 import sys
 import json
@@ -19,7 +17,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 
 # Configure logging
 logging.basicConfig(
@@ -32,19 +30,51 @@ logger = logging.getLogger(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger.info(f"--- Using device: {device} ---")
 
+import re
+
 def natural_sort_key(s):
-    """Sort strings with numbers in a way that humans expect (1, 2, 10 instead of 1, 10, 2)"""
-    import re
+    """Key for natural/alphanumeric sorting (e.g., '2' comes before '10')"""
     return [int(text) if text.isdigit() else text.lower()
             for text in re.split('([0-9]+)', str(s))]
 
 # 2. CUSTOM DATASET
-class MNISTFolderDataset(Dataset):
+class UniversalFolderDataset(Dataset):
     def __init__(self, folder_path, transform=None):
         self.folder_path = folder_path
         self.transform = transform
+        
+        if not os.path.exists(folder_path):
+            raise FileNotFoundError(f"Data directory not found: {folder_path}")
+            
         # Get all valid images
         self.file_names = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+        
+        if not self.file_names:
+            logger.warning(f"No images found in {folder_path}")
+
+        # DISCOVER CLASSES (Alphanumeric/Natural sorting)
+        discovered_classes = set()
+        for f in self.file_names:
+            label = self._extract_label(f)
+            if label is not None:
+                discovered_classes.add(label)
+        
+        self.classes = sorted(list(discovered_classes), key=natural_sort_key)
+        self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)}
+        
+        logger.info(f"Discovered classes (Naturally Sorted): {self.classes}")
+        logger.info(f"Class-to-Idx mapping: {self.class_to_idx}")
+
+    def _extract_label(self, img_name):
+        """Extract label from filename: 'class#img.jpg' or 'mnist_..._label_X.jpg'"""
+        try:
+            if '_label_' in img_name:
+                return img_name.split('_label_')[1].split('.')[0]
+            elif '#' in img_name:
+                return img_name.split('#')[0]
+            return None
+        except Exception:
+            return None
 
     def __len__(self):
         return len(self.file_names)
@@ -52,303 +82,279 @@ class MNISTFolderDataset(Dataset):
     def __getitem__(self, idx):
         img_name = self.file_names[idx]
         img_path = os.path.join(self.folder_path, img_name)
-        image = Image.open(img_path).convert('L') 
+        image = Image.open(img_path).convert('RGB') 
         
-        # Label extraction: 'mnist_train_00004_label_9.jpg' -> 9
-        try:
-            # Extract the label from 'label_X' pattern
-            label = int(img_name.split('_label_')[1].split('.')[0])
-        except Exception as e:
-            print(f"Warning: Could not extract label from {img_name}, defaulting to 0. Error: {e}")
-            label = 0
+        label_str = self._extract_label(img_name)
+        label = self.class_to_idx.get(label_str, 0)
             
         if self.transform:
             image = self.transform(image)
         return image, label
 
-# 3. MEDIUM CNN MODEL
-class MediumCNN(nn.Module):
-    def __init__(self):
-        super(MediumCNN, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2)
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 128),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(128, 10)
-        )
-
-    def forward(self, x):
-        x = self.features(x)
-        x = self.classifier(x)
-        return x
+def get_model(num_classes: int, device: torch.device) -> torch.nn.Module:
+    """Get MobileNetV2 with specific output classes"""
+    # DO NOT USE PRETRAINED WEIGHTS as requested by user
+    model = models.mobilenet_v2(pretrained=False)
+    in_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(in_features, num_classes)
+    return model.to(device)
 
 def plot_confusion_matrix(y_true, y_pred, classes, output_path):
     """Plot and save confusion matrix using seaborn"""
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(12, 10))
     cm = confusion_matrix(y_true, y_pred)
-    # Normalize
+    # Normalize by row (true labels)
     cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
     
     sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues',
                 xticklabels=classes, yticklabels=classes)
-    plt.title('Confusion Matrix (Normalized)')
+    plt.title('Confusion Matrix (Recall/Accuracy per Class)')
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+
+def plot_per_class_metrics(results, classes, output_path):
+    """Plot Bar chart for Precision, Recall, and F1 (Per Class)"""
+    x = np.arange(len(classes))
+    width = 0.25
+    
+    # Extract values
+    precision = [results['per_class_metrics'][cls]['precision'] for cls in classes]
+    recall = [results['per_class_metrics'][cls]['recall'] for cls in classes]
+    f1 = [results['per_class_metrics'][cls]['f1_score'] for cls in classes]
+    
+    plt.figure(figsize=(14, 7))
+    plt.bar(x - width, precision, width, label='Precision', color='#3498db', alpha=0.8)
+    plt.bar(x, recall, width, label='Recall', color='#2ecc71', alpha=0.8)
+    plt.bar(x + width, f1, width, label='F1 Score', color='#e74c3c', alpha=0.8)
+    
+    plt.xlabel('Class Label')
+    plt.ylabel('Score (0.0 - 1.0)')
+    plt.title('Model Performance Metrics by Class')
+    plt.xticks(x, classes)
+    plt.ylim(0, 1.1)
+    plt.legend(loc='lower right')
+    plt.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    # Add values on top
+    for i in range(len(classes)):
+        plt.text(i - width, precision[i] + 0.01, f"{precision[i]:.2f}", ha='center', va='bottom', fontsize=8)
+        plt.text(i, recall[i] + 0.01, f"{recall[i]:.2f}", ha='center', va='bottom', fontsize=8)
+        plt.text(i + width, f1[i] + 0.01, f"{f1[i]:.2f}", ha='center', va='bottom', fontsize=8)
+        
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
     plt.close()
 
 def find_latest_model(model_dir: str = "./global_models") -> Optional[str]:
     """Find the latest model checkpoint"""
-    if not os.path.exists(model_dir):
-        # Fallback to current dir if not found (common in dev)
-        if os.path.exists("../global_models"):
-            model_dir = "../global_models"
-        else:
-            return None
+    potential_dirs = [model_dir, "../global_models", "main/global_models"]
     
-    model_files = []
-    for ext in ['.pth', '.pt']:
-        model_files.extend(glob.glob(os.path.join(model_dir, f'*{ext}')))
-    
-    if not model_files:
-        return None
-    
-    model_files.sort(key=os.path.getmtime, reverse=True)
-    return model_files[0]
+    for d in potential_dirs:
+        if os.path.exists(d):
+            model_files = []
+            for ext in ['.pth', '.pt']:
+                model_files.extend(glob.glob(os.path.join(d, f'*{ext}')))
+            
+            if model_files:
+                model_files.sort(key=os.path.getmtime, reverse=True)
+                return model_files[0]
+    return None
 
 def save_detailed_report(results, output_dir):
-    """Save JSON and TXT reports"""
+    """Save JSON and TXT reports with enhanced metrics"""
+    os.makedirs(output_dir, exist_ok=True)
+    
     # Save JSON
     with open(os.path.join(output_dir, 'evaluation_results.json'), 'w') as f:
         json.dump(results, f, indent=4)
     
     # Save Summary TXT
     with open(os.path.join(output_dir, 'evaluation_summary.txt'), 'w') as f:
-        f.write("="*50 + "\n")
-        f.write("DETAILED EVALUATION SUMMARY\n")
-        f.write("="*50 + "\n")
-        f.write(f"Timestamp: {results['timestamp']}\n")
-        f.write(f"Accuracy:  {results['accuracy']:.2f}%\n")
-        f.write(f"Total Samples: {results['total_samples']}\n")
-        f.write("-" * 30 + "\n")
-        f.write("PER-CLASS ACCURACY:\n")
-        for cls_name, acc in results['per_class_accuracy'].items():
-            f.write(f"Class {cls_name}: {acc:.2f}%\n")
-        f.write("="*50 + "\n")
+        f.write("="*70 + "\n")
+        f.write("FEDERATED GLOBAL MODEL EVALUATION REPORT\n")
+        f.write("="*70 + "\n")
+        f.write(f"Timestamp:      {results['timestamp']}\n")
+        f.write(f"Global Accuracy: {results['global_metrics']['accuracy']:.2f}%\n")
+        f.write(f"Macro Precision: {results['global_metrics']['macro_precision']:.4f}\n")
+        f.write(f"Macro Recall:    {results['global_metrics']['macro_recall']:.4f}\n")
+        f.write(f"Macro F1 Score:  {results['global_metrics']['macro_f1']:.4f}\n")
+        f.write(f"Total Samples:   {results['total_samples']}\n")
+        f.write("-" * 70 + "\n")
+        f.write(f"{'Class':<8} | {'Accuracy':<10} | {'Precision':<10} | {'Recall':<8} | {'F1':<8}\n")
+        f.write("-" * 70 + "\n")
+        
+        for cls_name in sorted(results['per_class_metrics'].keys(), key=lambda x: int(x)):
+            m = results['per_class_metrics'][cls_name]
+            f.write(f"{cls_name:<8} | {m['accuracy']:>8.2f}% | {m['precision']:>9.4f} | {m['recall']:>8.4f} | {m['f1_score']:>8.4f}\n")
+        
+        f.write("="*70 + "\n")
+        f.write(f"Model: {results['model_used']}\n")
+        f.write(f"Data:  {results['data_used']}\n")
 
 # 4. MAIN EXECUTION
 if __name__ == "__main__":
-    # Set seeds for reproducibility
-    torch.manual_seed(42)
-    np.random.seed(42)
+    parser = argparse.ArgumentParser(description="Federated Learning Global Model Evaluator")
+    parser.add_argument('--data-dir', type=str, help='Path to test data directory')
+    parser.add_argument('--test-dir', type=str, help='Alias for --data-dir') # For backward compatibility
+    parser.add_argument('--model-path', type=str, default=None, help='Path to model weights')
+    parser.add_argument('--output-dir', type=str, default='./evaluation_results', help='Output directory for results')
+    parser.add_argument('--num-classes', type=int, default=10, help='Number of classes')
     
+    args, unknown = parser.parse_known_args()
+    
+    # Resolve dynamic data directory
+    val_folder = args.data_dir or args.test_dir
+    if not val_folder:
+        val_folder = "/home/mihir/Desktop/Final_IPD/IPD-F/processed_data/test"
+        if not os.path.exists(val_folder): val_folder = "processed_data/test"
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    logger.info(f"Targeting evaluation data at: {val_folder}")
+    
+    # Transforms (224x224 RGB as requested for MobileNetV2)
     transform = transforms.Compose([
-        transforms.Resize((28, 28)),
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    train_folder = 'mnist_600/train' # Main training data
-    val_folder = 'mnist_600/test'   # Validation data
-    
-    # Check if folders exist and adjust for running location
-    potential_base = os.path.dirname(os.path.abspath(__file__))
-    
-    def resolve_path(p):
-        if os.path.exists(p):
-            return p
-        # Check relative to script
-        script_relative = os.path.join(potential_base, p)
-        if os.path.exists(script_relative):
-            return script_relative
-        # Check parent (if run from inside main)
-        parent_relative = os.path.join(os.path.dirname(potential_base), p)
-        if os.path.exists(parent_relative):
-            return parent_relative
-        return p
+    try:
+        val_dataset = UniversalFolderDataset(val_folder, transform=transform)
+        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+        logger.info(f"Loaded {len(val_dataset)} test samples.")
+    except Exception as e:
+        logger.error(f"Failed to load dataset: {e}")
+        sys.exit(1)
 
-    train_folder = resolve_path(train_folder)
-    val_folder = resolve_path(val_folder)
+    # Initialize model and load weights
+    num_classes = args.num_classes
+    discovered_count = len(val_dataset.classes)
     
-    if not os.path.exists(train_folder):
-        print(f"Error: Training folder '{train_folder}' not found.")
-        exit()
-             
-    if not os.path.exists(val_folder):
-        print(f"Error: Validation folder '{val_folder}' not found.")
-        exit()
-    
-    # Load training data and split into train/test
-    train_dataset = MNISTFolderDataset(train_folder, transform=transform)
-    
-    # Split training data into train and test (80/20)
-    indices = list(range(len(train_dataset)))
-    train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42, shuffle=True)
-    
-    # Load validation data from separate folder
-    val_dataset = MNISTFolderDataset(val_folder, transform=transform)
-    
-    print(f"Training set size: {len(train_idx)} (from {train_folder})")
-    print(f"Test set size: {len(test_idx)} (from {train_folder})")
-    print(f"Validation set size: {len(val_dataset)} (from {val_folder})")
-    
-    # Check label distributions
-    train_labels = [train_dataset[i][1] for i in train_idx]
-    test_labels = [train_dataset[i][1] for i in test_idx]
-    val_labels = [val_dataset[i][1] for i in range(len(val_dataset))]
-    
-    print(f"\nLabel distributions:")
-    print(f"Train: {np.bincount(train_labels)}")
-    print(f"Test:  {np.bincount(test_labels)}")
-    print(f"Val:   {np.bincount(val_labels)}")
-    print()
-
-    # Create data loaders
-    train_loader = DataLoader(Subset(train_dataset, train_idx), batch_size=64, shuffle=True)
-    test_loader = DataLoader(Subset(train_dataset, test_idx), batch_size=64, shuffle=False)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
-
-    model = MediumCNN().to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-    # TRAINING PHASE
-    print("=" * 50)
-    print("TRAINING PHASE")
-    print("=" * 50)
-    for epoch in range(5):
-        model.train()
-        running_loss = 0.0
-        train_correct = 0
-        train_total = 0
+    # Auto-adjust if discovered more than default, and user hasn't explicitly overridden to something else
+    if discovered_count > 0 and num_classes == 10 and discovered_count != 10:
+        logger.info(f"Auto-adjusting num_classes to {discovered_count} (discovered from test data)")
+        num_classes = discovered_count
         
-        for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
-            
-            optimizer.zero_grad()
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-            
-            # Track training accuracy
-            _, predicted = torch.max(outputs.data, 1)
-            train_total += labels.size(0)
-            train_correct += (predicted == labels).sum().item()
-        
-        # Test set evaluation during training
-        model.eval()
-        test_correct = 0
-        test_total = 0
-        with torch.no_grad():
-            for images, labels in test_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                _, predicted = torch.max(outputs.data, 1)
-                test_total += labels.size(0)
-                test_correct += (predicted == labels).sum().item()
-        
-        avg_loss = running_loss / len(train_loader)
-        train_accuracy = 100 * train_correct / train_total
-        test_accuracy = 100 * test_correct / test_total
-        
-        print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f} | Train Acc: {train_accuracy:.2f}% | Test Acc: {test_accuracy:.2f}%")
-    
-    # VALIDATION PHASE
-    print("\n" + "=" * 50)
-    print("VALIDATION PHASE (on separate folder)")
-    print("=" * 50)
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--test-dir', type=str, default=val_folder)
-    parser.add_argument('--model-path', type=str, default=None)
-    parser.add_argument('--output-dir', type=str, default='./evaluation_results')
-    args, unknown = parser.parse_known_args()
-
-    output_dir = args.output_dir
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # If model_path is provided, load it
-    test_model = model
-    final_model_path = args.model_path
-    if not final_model_path:
-        final_model_path = find_latest_model()
+    model = get_model(num_classes=num_classes, device=device)
+    final_model_path = args.model_path or find_latest_model()
         
     if final_model_path and os.path.exists(final_model_path):
         logger.info(f"Loading weights from {final_model_path}")
-        checkpoint = torch.load(final_model_path, map_location=device)
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            test_model.load_state_dict(checkpoint['model_state_dict'])
-        elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-            test_model.load_state_dict(checkpoint['state_dict'])
-        else:
-            test_model.load_state_dict(checkpoint)
-    elif args.model_path:
-        logger.error(f"Model path {args.model_path} not found.")
-        exit(1)
+        try:
+            checkpoint = torch.load(final_model_path, map_location=device)
+            state_dict = checkpoint['model_state_dict'] if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint else checkpoint
+            
+            # Clean state_dict
+            new_state_dict = { (k[7:] if k.startswith('module.') else k): v for k, v in state_dict.items() }
+            
+            # Detailed mismatch check before loading
+            model_dict = model.state_dict()
+            mismatches = []
+            for k, v in new_state_dict.items():
+                if k in model_dict:
+                    if v.shape != model_dict[k].shape:
+                        mismatches.append(f"  - {k}: architecture has {model_dict[k].shape}, but checkpoint has {v.shape}")
+            
+            if mismatches:
+                logger.error(f"FATAL: ARCHITECTURE MISMATCH DETECTED for {len(mismatches)} layers:")
+                for m in mismatches[:10]: logger.error(m)
+                if len(mismatches) > 10: logger.error(f"  ... and {len(mismatches)-10} more")
+                logger.error("Suggestion: Delete old 'global_models/' and 'outputs/' and restart training for a clean MobileNetV2 run.")
+                sys.exit(1)
+
+            # Enforce STRICT weight loading
+            model.load_state_dict(new_state_dict, strict=True)
+            logger.info("Successfully loaded model weights (STRICT MODE).")
+            
+            # --- PROOF OF WEIGHT LOADING ---
+            # Print statistics of the classifier layer to show it's not random/empty
+            if 'classifier.1.weight' in new_state_dict:
+                w = new_state_dict['classifier.1.weight']
+                logger.info(f"Loaded Weight Stats [classifier.1.weight]: Mean={w.mean():.6f}, Std={w.std():.6f}, Max={w.max():.6f}")
+            # -------------------------------
+            
+        except Exception as e:
+            logger.error(f"Failed to load state dict (STRICT): {e}")
+            sys.exit(1)
     else:
-        logger.warning("No pre-trained model found. Using the model from current training phase.")
+        logger.error("No model weights found.")
+        sys.exit(1)
+
+    # EVALUATION
+    model.eval()
+    all_preds, all_targets = [], []
     
-    test_model.eval()
-    val_correct = 0
-    val_total = 0
-    all_preds = []
-    all_targets = []
-    
+    logger.info("Starting evaluation...")
     with torch.no_grad():
         for images, labels in val_loader:
             images, labels = images.to(device), labels.to(device)
-            outputs = test_model(images)
+            outputs = model(images)
             _, predicted = torch.max(outputs.data, 1)
-            val_total += labels.size(0)
-            val_correct += (predicted == labels).sum().item()
             all_preds.extend(predicted.cpu().numpy())
             all_targets.extend(labels.cpu().numpy())
     
-    val_accuracy = 100 * val_correct / val_total
-    print(f"Validation Accuracy on {val_folder}: {val_accuracy:.2f}%")
-    print(f"Correctly classified: {val_correct}/{val_total}")
+    if not all_targets:
+        logger.error("No samples evaluated."); sys.exit(1)
+        
+    # CALCULATE METRICS
+    y_true = np.array(all_targets)
+    y_pred = np.array(all_preds)
     
-    # Generate Results Dict
-    classes = [str(i) for i in range(10)]
-    per_class_acc = {}
-    cm = confusion_matrix(all_targets, all_preds)
-    for i in range(10):
+    # Global Metrics
+    precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+    macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(y_true, y_pred, average='macro')
+    accuracy = 100 * (y_true == y_pred).sum() / len(y_true)
+    
+    # Per-Class Metrics
+    p_class, r_class, f1_class, _ = precision_recall_fscore_support(y_true, y_pred, labels=list(range(args.num_classes)))
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(args.num_classes)))
+    
+    per_class_metrics = {}
+    for i in range(args.num_classes):
         class_total = np.sum(cm[i, :])
-        if class_total > 0:
-            per_class_acc[str(i)] = 100 * cm[i, i] / class_total
-        else:
-            per_class_acc[str(i)] = 0.0
+        class_acc = (100 * cm[i, i] / class_total) if class_total > 0 else 0.0
+        per_class_metrics[str(i)] = {
+            "accuracy": class_acc,
+            "precision": float(p_class[i]),
+            "recall": float(r_class[i]),
+            "f1_score": float(f1_class[i])
+        }
 
+    now = datetime.now()
     results = {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "accuracy": val_accuracy,
-        "total_samples": val_total,
-        "per_class_accuracy": per_class_acc
+        "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "total_samples": len(y_true),
+        "global_metrics": {
+            "accuracy": accuracy,
+            "weighted_precision": float(precision),
+            "weighted_recall": float(recall),
+            "weighted_f1": float(f1),
+            "macro_precision": float(macro_precision),
+            "macro_recall": float(macro_recall),
+            "macro_f1": float(macro_f1)
+        },
+        "per_class_metrics": per_class_metrics,
+        "model_used": os.path.abspath(final_model_path),
+        "data_used": os.path.abspath(val_folder)
     }
     
-    # Save Reports
-    save_detailed_report(results, output_dir)
+    # SAVE AND PLOT
+    timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+    target_output_dir = os.path.join(args.output_dir, f"run_{timestamp_str}")
+    os.makedirs(target_output_dir, exist_ok=True)
     
-    # Plot CM
-    plot_confusion_matrix(all_targets, all_preds, classes, os.path.join(output_dir, 'confusion_matrix.png'))
+    classes = [str(i) for i in range(args.num_classes)]
+    save_detailed_report(results, target_output_dir)
+    plot_confusion_matrix(y_true, y_pred, classes, os.path.join(target_output_dir, 'confusion_matrix.png'))
+    plot_per_class_metrics(results, classes, os.path.join(target_output_dir, 'per_class_performance.png'))
     
-    # Latest Results feature
-    latest_dir = os.path.join(os.path.dirname(output_dir), 'latest_results')
-    if os.path.exists(latest_dir):
-        shutil.rmtree(latest_dir)
-    shutil.copytree(output_dir, latest_dir)
-    logger.info(f"Latest results updated at: {os.path.abspath(latest_dir)}")
+    # Update latest folder
+    latest_dir = os.path.join(args.output_dir, 'latest')
+    if os.path.exists(latest_dir): shutil.rmtree(latest_dir)
+    shutil.copytree(target_output_dir, latest_dir)
     
-    print("=" * 50)
+    logger.info(f"Evaluation complete. Reports generated in '{target_output_dir}'")
+    logger.info(f"Summary: Accuracy={accuracy:.2f}%, F1={macro_f1:.4f}")

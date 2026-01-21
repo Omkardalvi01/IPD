@@ -31,43 +31,44 @@ def load_client_payloads(client_payloads_dir: str) -> Dict[str, Dict[str, Any]]:
     for txt_file in txt_files:
         file_path = os.path.join(client_payloads_dir, txt_file)
         try:
-            percentage = 1.0 # Default weight if not specified
-            content = ""
+            percentage = 1.0 
+            weights = {}
             
             with open(file_path, 'r') as f:
-                first_line = f.readline()
-                if first_line.startswith("# WEIGHT_PERCENTAGE:"):
-                    try:
-                        percentage = float(first_line.split(":")[1].strip())
-                        print(f"found percentage: {percentage} for client: {txt_file}")
-                    except ValueError:
-                        print(f"Error parsing percentage in {txt_file}, using default")
-                    content = f.read() # Read the rest
-                else:
-                    content = first_line + f.read() # Read all
-            
-            # Assume the txt file contains a JSON-like dictionary as text
-            data = json.loads(content)
+                lines = f.readlines()
+                
+            # Parse custom text format
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                if not line:
+                    i += 1
+                    continue
+                if line.startswith("# WEIGHT_PERCENTAGE:"):
+                    percentage = float(line.split(":")[1].strip())
+                    i += 1
+                    continue
+                
+                # Parse layer info
+                parts = line.split()
+                if len(parts) >= 2:
+                    layer_name = parts[0]
+                    shape = [int(s) for s in parts[1:]]
+                    i += 1
+                    if i < len(lines):
+                        weight_values = [float(v) for v in lines[i].strip().split()]
+                        weights[layer_name] = torch.tensor(weight_values).view(shape)
+                i += 1
             
             # Extract client ID from filename
             client_id = txt_file.replace('.txt', '').replace('edge_', '').replace('client_', '')
-            # Skip metadata or chunk files
-            if 'metadata' in txt_file:
-                print(f"Skipping metadata file: {txt_file}")
-                continue
-            if 'chunk_' in txt_file:
-                print(f"Skipping chunk file: {txt_file}")
-                continue
-            # The file should directly contain the weights dict
-            weights = {}
-            for layer_name, layer_weights in data.items():
-                weights[layer_name] = torch.tensor(layer_weights, dtype=torch.float32)
             
-            client_weights[client_id] = {
-                'weights': weights,
-                'factor': percentage
-            }
-            print(f"Loaded weights for client {client_id}: {len(weights)} layers (Weight Factor: {percentage})")
+            if weights:
+                client_weights[client_id] = {
+                    'weights': weights,
+                    'factor': percentage
+                }
+                print(f"Loaded weights for client {client_id}: {len(weights)} layers (Weight Factor: {percentage})")
         except Exception as e:
             print(f"Error loading {txt_file}: {e}")
             continue

@@ -7,4 +7,13 @@ edge/venv/
 edge/*.txt
 main/*.txt
 main/*/
-mnist_jpg/*/
+mnist_jpg/
+Butterfly/
+processed_data/
+dataset/
+*.zip
+*.tar.gz
+*.pyc
+*jpg
+*png
+*jpeg

@@ -27,7 +27,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from edge.model_utils import (
     get_model, get_device, create_data_loaders, 
-    save_model, load_model, validate_image_file
+    save_model, load_model, validate_image_file,
+    natural_sort_key
 )
 
 # Configure logging
@@ -87,18 +88,16 @@ class WebSocketTrainer:
                 # 1. class#image.jpg
                 # 2. mnist_train_XXXXX_label_Y.jpg
                 if 'label_' in filename:
-                    try:
-                        label = filename.split('_label_')[1].split('.')[0]
-                        classes.add(label)
-                    except Exception:
-                        logger.warning(f"Could not extract label from {filename}, skipping")
+                    # MNIST format: extract the label after 'label_'
+                    label = filename.split('label_')[-1].split('.')[0]
+                    classes.add(label)
                 elif '#' in filename:
                     # Original format: class#image.jpg
                     class_name = filename.split('#')[0]
                     classes.add(class_name)
         
-        classes = sorted(list(classes))
-        logger.info(f"Discovered classes: {classes}")
+        classes = sorted(list(classes), key=natural_sort_key)
+        logger.info(f"Discovered classes (Naturally Sorted): {classes}")
         return {cls_name: idx for idx, cls_name in enumerate(classes)}
     
     def _count_images(self, data_dir: Path) -> int:
@@ -160,7 +159,6 @@ class WebSocketTrainer:
                     logger.info(f"Using forced num_classes from hyperparams: {hyperparams['num_classes']}")
                 
                 logger.info(f"Using hyperparams: Batch={self.batch_size}, LR={self.learning_rate}, Epochs={self.num_epochs}")
-
             logger.info(f"Starting training session on directory: {data_dir}")
             data_path = Path(data_dir)
             
@@ -220,16 +218,9 @@ class WebSocketTrainer:
                         else:
                             state_dict = checkpoint
                             
-                        # Handle architecture mismatches (e.g. classifier layer)
-                        model_dict = self.model.state_dict()
-                        
-                        # Filter out unnecessary keys or mismatched shapes
-                        pretrained_dict = {k: v for k, v in state_dict.items() 
-                                         if k in model_dict and v.shape == model_dict[k].shape}
-                        
-                        logger.info(f"Loading {len(pretrained_dict)}/{len(model_dict)} layers from checkpoint")
-                        model_dict.update(pretrained_dict)
-                        self.model.load_state_dict(model_dict)
+                        # Enforce STRICT loading for global weights
+                        self.model.load_state_dict(state_dict, strict=True)
+                        logger.info("✅ SUCCESSFUL GLOBAL WEIGHT SYNC: Model is now using the latest broadcasted weights (STRICT MODE).")
                         
                     except Exception as e:
                         logger.warning(f"Failed to load initial weights: {e}")
@@ -237,7 +228,9 @@ class WebSocketTrainer:
                     logger.warning(f"Initial model path provided but not found: {model_path}")
 
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
-            self.training_epoch = 0
+
+            self.training_epoch = 0 # In a real scenario, we might want to continue epoch count
+
             
             # Create data loaders
             try:
@@ -284,11 +277,11 @@ class WebSocketTrainer:
                         total_loss += loss.item()
                         num_batches += 1
                         
-                        # Yield control to event loop
+                        # Yield control to event loop to keep WebSocket connection alive
                         if batch_idx % 5 == 0:
                             await asyncio.sleep(0)
                         
-                        if batch_idx % 10 == 0:
+                        if batch_idx % 10 == 0:  # Log every 10 batches
                             logger.info(f"Epoch {epoch + 1}, Batch {batch_idx}: Loss = {loss.item():.4f}")
                         
                     except Exception as e:
@@ -427,11 +420,10 @@ async def handle_client(websocket, path=None):
                     
                     # Extract hyperparameters safely
                     hyperparams = {}
-                    for key in ['batch_size', 'learning_rate', 'epochs', 'model_path']:
+                    for key in ['batch_size', 'learning_rate', 'epochs', 'model_path', 'num_classes']:
                         val = data.get(key)
                         if val is not None:
                             hyperparams[key] = val
-                    
                 except json.JSONDecodeError:
                     # Fallback: treat as plain text directory path
                     data_dir = message.strip()

@@ -145,6 +145,15 @@ def receive_uids():
         # Save the aggregated weights and get the saved paths (model_info is a dict)
         model_info = save_global_model(global_weights, aggregation_dir)
         
+        # Mirror to 'latest' directory
+        import shutil
+        latest_dir = os.path.join(GLOBAL_WEIGHTS_DIR, "latest")
+        if os.path.exists(latest_dir):
+            shutil.rmtree(latest_dir)
+        shutil.copytree(aggregation_dir, latest_dir)
+        logger_name = "API_SERVER"
+        print(f"[{logger_name}] Aggregation mirrored to: {latest_dir}")
+        
         # Get the full path to the saved model file
         model_path = model_info.get('model_path', '')
         

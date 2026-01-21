@@ -112,15 +112,8 @@ func (w *Worker) start(wg1, wg2 *sync.WaitGroup, total_files int) {
 				if r.remote_name != "" {
 					send_file_name = r.remote_name
 				} else {
-					// Default logic for data files: preserve some path info using '#'
-					parts := strings.Split(f.Name(), "/")
-					var file_name string
-					if len(parts) > 1 {
-						file_name = strings.Join(parts[1:], "/")
-					} else {
-						file_name = filepath.Base(f.Name())
-					}
-					send_file_name = strings.ReplaceAll(file_name, "/", "#")
+					// Use only the base filename to keep edge storage clean
+					send_file_name = filepath.Base(r.f)
 				}
 
 				dc.SendText(send_file_name)
