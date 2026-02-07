@@ -507,15 +507,78 @@ def create_label_files(output_dir):
         
         print(f"  ✓ {split}: {len(labels_info)} images, {len(class_to_idx)} classes")
 
-def simple_in_place_split(data_dir):
-    """Fallback simple split logic for Go"""
+def simple_in_place_split(data_dir, train_ratio=0.8, seed=42):
+    """
+    Simple in-place splitting of images into flat train and test folders.
+    All images are dumped directly into train/ and test/ without class subdirectories.
+    """
+    import random
+    random.seed(seed)
+    
+    image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp')
     train_dir = os.path.join(data_dir, "train")
     test_dir = os.path.join(data_dir, "test")
+    
+    # If already split and populated, skip
     if os.path.exists(train_dir) and os.path.exists(test_dir):
-        return train_dir
+        train_images = [f for f in os.listdir(train_dir) if f.lower().endswith(image_extensions)]
+        test_images = [f for f in os.listdir(test_dir) if f.lower().endswith(image_extensions)]
+        if train_images and test_images:
+            print(f"  ✓ Data already split in {data_dir}")
+            return train_dir
+
     os.makedirs(train_dir, exist_ok=True)
     os.makedirs(test_dir, exist_ok=True)
-    # ... (impl omitted for brevity or kept simple)
+    
+    # Collect all images
+    all_images = []
+    print(f"🔍 Scanning {data_dir} for images...")
+    
+    for root, dirs, files in os.walk(data_dir):
+        # Skip existing train/test dirs
+        rel_root = os.path.relpath(root, data_dir)
+        if rel_root.startswith("train") or rel_root.startswith("test"):
+            continue
+            
+        for file in files:
+            if file.lower().endswith(image_extensions):
+                full_path = os.path.join(root, file)
+                all_images.append(full_path)
+    
+    if not all_images:
+        print(f"  ⚠️  No images found to split in {data_dir}")
+        return train_dir
+        
+    print(f"  Splitting {len(all_images)} images...")
+    
+    random.shuffle(all_images)
+    split_idx = int(len(all_images) * train_ratio)
+    
+    train_set = all_images[:split_idx]
+    test_set = all_images[split_idx:]
+    
+    for img_path in train_set:
+        dest = os.path.join(train_dir, os.path.basename(img_path))
+        if img_path != dest:
+            shutil.move(img_path, dest)
+            
+    for img_path in test_set:
+        dest = os.path.join(test_dir, os.path.basename(img_path))
+        if img_path != dest:
+            shutil.move(img_path, dest)
+
+    # Cleanup empty original subdirectories
+    for root, dirs, files in os.walk(data_dir, topdown=False):
+        rel_root = os.path.relpath(root, data_dir)
+        if rel_root == "." or rel_root.startswith("train") or rel_root.startswith("test"):
+            continue
+        try:
+            if not os.listdir(root):
+                os.rmdir(root)
+        except OSError:
+            pass
+
+    print(f"✅ Split complete: {len(train_set)} train, {len(test_set)} test")
     return train_dir
 
 
@@ -528,9 +591,10 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # 1. ORCHESTRATOR COMPATIBILITY: If it looks like it's already processed, just print path and exit.
+    # ORCHESTRATOR COMPATIBILITY: If it looks like it's already processed,
+    # just print path and exit (unless --split or --universal is explicitly passed)
     train_dir = os.path.join(args.data_dir, "train")
-    if os.path.exists(train_dir) and not args.universal:
+    if os.path.exists(train_dir) and not args.universal and not args.split:
         print(train_dir)
         sys.exit(0)
         

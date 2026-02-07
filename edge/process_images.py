@@ -498,7 +498,7 @@ async def main():
     # Start the WebSocket server with proper exception handling
     try:
         # Increase timeouts to handle long training times (default is usually ~20s)
-        async with websockets.serve(handle_client, args.host, args.port, ping_interval=60, ping_timeout=60):
+        async with websockets.serve(handle_client, args.host, args.port, ping_interval=300, ping_timeout=300):
             logger.info("WebSocket server started. Waiting for connections...")
             logger.info("Press Ctrl+C to stop the server")
             

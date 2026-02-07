@@ -167,7 +167,7 @@ func (w *Worker) start(wg1, wg2 *sync.WaitGroup, total_files int) {
 			msgText := string(msg.Data)
 			switch {
 			case strings.HasPrefix(msgText, "DHAK-DHAK"):
-				// log.Printf("Worker %d: Heartbeat received", w.worker_id)
+				log.Printf("Worker %d: Heartbeat from edge: %s", w.worker_id, msgText)
 
 			case strings.HasPrefix(msgText, "FILE:"):
 				if currentFile != nil {
