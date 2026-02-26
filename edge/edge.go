@@ -72,11 +72,18 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 	// Wait a bit to ensure the marker is processed
 	time.Sleep(100 * time.Millisecond)
 
-	// Send file data in chunks
-	buffer := make([]byte, 16*1024) // Smaller chunks for better reliability
+	// Send file data in chunks with flow control
+	buffer := make([]byte, 16*1024) 
+	const maxBufferedAmount = 1024 * 1024 // 1MB threshold
 	totalSent := 0
 	chunkCount := 0
 	for {
+		// FLOW CONTROL: If WebRTC buffer is too full, wait
+		for dc.BufferedAmount() > maxBufferedAmount {
+			// log.Printf("WebRTC buffer full (%d bytes), waiting...", dc.BufferedAmount())
+			time.Sleep(50 * time.Millisecond)
+		}
+
 		n, err := file.Read(buffer)
 		if err != nil && err != io.EOF {
 			log.Printf("Error reading file chunk: %v", err)
@@ -93,8 +100,10 @@ func sendFileToServer(uid, filePath string, dc *webrtc.DataChannel) error {
 		}
 		totalSent += n
 		chunkCount++
-		if chunkCount%50 == 0 || totalSent == int(fileInfo.Size()) {
-			log.Printf("Sent %d/%d bytes (%.1f%%) - %d chunks", totalSent, fileInfo.Size(), float64(totalSent)/float64(fileInfo.Size())*100, chunkCount)
+		if chunkCount%100 == 0 || totalSent == int(fileInfo.Size()) {
+			log.Printf("Sent %d/%d bytes (%.1f%%) - %d chunks - Buffer: %d", 
+				totalSent, fileInfo.Size(), float64(totalSent)/float64(fileInfo.Size())*100, 
+				chunkCount, dc.BufferedAmount())
 		}
 	}
 

@@ -78,58 +78,6 @@ class WebSocketTrainer:
         logger.info("WebSocket trainer initialized")
         logger.info(f"Model save path: {self.model_save_path}")
     
-    def _discover_classes(self, data_dir: Path) -> Dict[str, int]:
-        """Discover classes from filenames."""
-        classes = set()
-        for file in data_dir.iterdir():
-            if file.is_file() and self._is_image_file(file.name):
-                filename = file.name
-                # Handle both formats:
-                # 1. class#image.jpg
-                # 2. mnist_train_XXXXX_label_Y.jpg
-                if 'label_' in filename:
-                    # MNIST format: extract the label after 'label_'
-                    label = filename.split('label_')[-1].split('.')[0]
-                    classes.add(label)
-                elif '#' in filename:
-                    # Original format: class#image.jpg
-                    class_name = filename.split('#')[0]
-                    classes.add(class_name)
-        
-        classes = sorted(list(classes), key=natural_sort_key)
-        logger.info(f"Discovered classes (Naturally Sorted): {classes}")
-        return {cls_name: idx for idx, cls_name in enumerate(classes)}
-    
-    def _count_images(self, data_dir: Path) -> int:
-        """Count total number of images in data directory."""
-        count = 0
-        for file in data_dir.iterdir():
-            if file.is_file() and self._is_image_file(file.name):
-                count += 1
-        return count
-    
-    def _validate_images(self, data_dir: Path) -> int:
-        """Validate images and return count of valid images."""
-        valid_count = 0
-        invalid_files = []
-        
-        for file in data_dir.iterdir():
-            if file.is_file() and self._is_image_file(file.name):
-                file_path = file
-                if validate_image_file(file_path):
-                    valid_count += 1
-                else:
-                    invalid_files.append(file_path)
-        
-        if invalid_files:
-            logger.warning(f"Found {len(invalid_files)} invalid image files:")
-            for file in invalid_files[:5]:  # Show first 5
-                logger.warning(f"  - {file}")
-            if len(invalid_files) > 5:
-                logger.warning(f"  ... and {len(invalid_files) - 5} more")
-        
-        return valid_count
-    
     def _is_image_file(self, filename: str) -> bool:
         """Check if the file has a valid image extension."""
         valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
@@ -333,50 +281,179 @@ class WebSocketTrainer:
             logger.error(error_msg, exc_info=True)
             return {"success": False, "error": error_msg}
     
-    def _save_model_parameters(self) -> str:
-        """Save model parameters to a text file in the root directory.
+    async def train_on_images(self, data_dir: str, hyperparams: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Perform training session on images in the given directory.
         
+        Args:
+            data_dir: Path to directory containing images
+            hyperparams: Optional dictionary of hyperparameters (epochs, batch_size, lr, model_path)
+            
         Returns:
-            str: Path to the saved parameters file
+            Dict containing training results and output file path
         """
         try:
-            # Get the root directory (where the script is located)
+            # Update hyperparameters if provided
+            if hyperparams:
+                if hyperparams.get('batch_size') is not None:
+                    self.batch_size = int(hyperparams['batch_size'])
+                if hyperparams.get('learning_rate') is not None:
+                    self.learning_rate = float(hyperparams['learning_rate'])
+                if hyperparams.get('epochs') is not None:
+                    self.num_epochs = int(hyperparams['epochs'])
+                
+                logger.info(f"Using hyperparams: Batch={self.batch_size}, LR={self.learning_rate}, Epochs={self.num_epochs}")
+            
+            logger.info(f"Starting training session on directory: {data_dir}")
+            data_path = Path(data_dir)
+            
+            if not data_path.exists():
+                error_msg = f"Directory {data_dir} does not exist"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+            
+            # [Optimization] Consolidated scanning: count, validate, and discover classes in ONE pass
+            logger.info(f"Scanning dataset in {data_dir}...")
+            valid_images = 0
+            total_images = 0
+            discovered_classes = set()
+            
+            for file in data_path.iterdir():
+                if file.is_file() and self._is_image_file(file.name):
+                    total_images += 1
+                    if validate_image_file(file):
+                        valid_images += 1
+                        filename = file.name
+                        if 'label_' in filename:
+                            label = filename.split('label_')[-1].split('.')[0]
+                            discovered_classes.add(label)
+                        elif '#' in filename:
+                            class_name = filename.split('#')[0]
+                            discovered_classes.add(class_name)
+            
+            if valid_images == 0:
+                error_msg = "No valid images found in directory"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+            
+            logger.info(f"Found {valid_images} valid images out of {total_images} total")
+            
+            # Sort classes naturally
+            sorted_classes = sorted(list(discovered_classes), key=natural_sort_key)
+            self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(sorted_classes)}
+            
+            if not self.class_to_idx:
+                error_msg = "No valid classes found in image filenames"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+                
+            logger.info(f"Discovered {len(self.class_to_idx)} classes: {list(self.class_to_idx.keys())}")
+            
+            # Initialize model
+            forced_classes = hyperparams.get('num_classes') if hyperparams else None
+            num_classes = int(forced_classes) if forced_classes is not None else len(self.class_to_idx)
+            
+            logger.info(f"INITIALIZING MODEL with {num_classes} classes")
+            self.model = get_model(num_classes, self.device)
+            
+            # Load initial weights if provided
+            if hyperparams and 'model_path' in hyperparams and hyperparams['model_path']:
+                model_path = hyperparams['model_path']
+                if os.path.exists(model_path):
+                    logger.info(f"LOADING GLOBAL WEIGHTS from: {model_path}")
+                    try:
+                        checkpoint = torch.load(model_path, map_location=self.device)
+                        state_dict = checkpoint.get('model_state_dict', checkpoint.get('state_dict', checkpoint))
+                        self.model.load_state_dict(state_dict, strict=True)
+                        logger.info("✅ SUCCESSFUL GLOBAL WEIGHT SYNC (STRICT MODE).")
+                    except Exception as e:
+                        logger.warning(f"Failed to load initial weights: {e}")
+            
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+            self.model.train()
+            
+            # Create data loaders
+            dataloader, _ = create_data_loaders(str(data_path), batch_size=self.batch_size, num_workers=2)
+            
+            # Training loop
+            total_loss = 0.0
+            num_batches = 0
+            for epoch in range(self.num_epochs):
+                epoch_loss = 0.0
+                epoch_batches = 0
+                logger.info(f"Starting epoch {epoch + 1}/{self.num_epochs}")
+                
+                for batch_idx, (images, labels) in enumerate(dataloader):
+                    images, labels = images.to(self.device), labels.to(self.device)
+                    self.optimizer.zero_grad()
+                    outputs = self.model(images)
+                    loss = self.criterion(outputs, labels)
+                    loss.backward()
+                    self.optimizer.step()
+                    
+                    epoch_loss += loss.item()
+                    epoch_batches += 1
+                    total_loss += loss.item()
+                    num_batches += 1
+                    
+                    if batch_idx % 5 == 0:
+                        await asyncio.sleep(0)  # Keep WebSocket alive
+                
+                logger.info(f"Epoch {epoch + 1} completed. Avg loss: {epoch_loss/max(epoch_batches, 1):.4f}")
+            
+            # Save results
+            if num_batches > 0:
+                avg_loss = total_loss / num_batches
+                output_file_path = self._save_model_parameters()
+                return {
+                    "success": True, 
+                    "output_file_path": output_file_path,
+                    "average_loss": avg_loss,
+                    "num_classes": num_classes,
+                    "valid_images": valid_images
+                }
+            return {"success": False, "error": "No batches processed"}
+                
+        except Exception as e:
+            logger.error(f"Training failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def _save_model_parameters(self) -> str:
+        """Save model parameters to a text file using memory-efficient streaming."""
+        import gc
+        try:
             root_dir = Path(__file__).parent
-            
-            # Try to get edge ID from environment variable, fallback to timestamp
-            edge_id = os.environ.get('EDGE_ID')
-            if not edge_id:
-                edge_id = f"{int(time.time())}"
-                logger.warning(f"No EDGE_ID environment variable found, using timestamp as filename: {edge_id}")
-            
-            # Create the output filename in the root directory
+            edge_id = os.environ.get('EDGE_ID', f"{int(time.time())}")
             output_path = root_dir / f"{edge_id}.txt"
             
+            logger.info("Serializing model parameters to disk (streaming mode)...")
             with open(output_path, 'w') as f:
-                # Write Weight Percentage Header if available
                 percentage = os.environ.get('ALLOCATED_PERCENTAGE')
                 if percentage:
                     f.write(f"# WEIGHT_PERCENTAGE: {percentage}\n")
                 
-                # Iterate through all parameters in the model
                 for name, param in self.model.state_dict().items():
-                    # Skip num_batches_tracked in BatchNorm layers
                     if 'num_batches_tracked' in name:
                         continue
-                        
-                    # Get parameter values as a flat list of strings
-                    values = ['{:.8f}'.format(x.item()) for x in param.view(-1)]
                     
-                    # Write layer name and shape
-                    shape = ' '.join(map(str, param.shape))
-                    f.write(f"{name} {shape}\n")
+                    shape_str = ' '.join(map(str, param.shape))
+                    f.write(f"{name} {shape_str}\n")
                     
-                    # Write parameter values
-                    f.write(' '.join(values) + '\n')
+                    # Stream values in chunks to keep RAM usage constant
+                    param_flat = param.view(-1).cpu().numpy()
+                    chunk_size = 5000 
+                    for i in range(0, len(param_flat), chunk_size):
+                        chunk = param_flat[i : i + chunk_size]
+                        f.write(' '.join(['{:.8f}'.format(x) for x in chunk]) + ' ')
+                    f.write('\n')
             
-            logger.info(f"Model parameters saved to {output_path}")
+            # Clean up memory immediately
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+            logger.info(f"Model parameters successfully saved to {output_path}")
             return str(output_path)
-            
         except Exception as e:
             logger.error(f"Error saving model parameters: {e}")
             raise
